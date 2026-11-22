@@ -29,6 +29,7 @@ class AudioEngine(
     private val wakeWordDetector: WakeWordDetector,
     private val onEncodedFrame: (ByteArray) -> Unit,
     private val onWakeWordDetected: (String) -> Unit,
+    private val onExitWordDetected: (String) -> Unit,
     private val onVoiceActivity: (Boolean) -> Unit
 ) {
     private var audioRecord: AudioRecord? = null
@@ -57,7 +58,9 @@ class AudioEngine(
         wakeWordDetector.setActiveWakeWord(selectedWakeWord)
     }
 
-    fun startConversationCapture() {
+    fun startConversationCapture(selectedWakeWord: String? = null) {
+        wakeWordDetector.initialize(selectedWakeWord)
+        wakeWordDetector.reset()
         captureMode = CaptureMode.CONVERSATION
         ensureCaptureLoopRunning()
     }
@@ -124,10 +127,20 @@ class AudioEngine(
                         val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
                         if (keyword != null) {
                             onWakeWordDetected(keyword)
+                        } else {
+                            val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
+                            if (exitKeyword != null) {
+                                onExitWordDetected(exitKeyword)
+                            }
                         }
                     }
 
                     CaptureMode.CONVERSATION -> {
+                        val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
+                        if (exitKeyword != null) {
+                            onExitWordDetected(exitKeyword)
+                            continue
+                        }
                         val avgAmp = pcmBuffer.fold(0L) { acc, s -> acc + abs(s.toInt()) } / frameSamples
                         val vad = avgAmp > 350
                         if (vad != lastVad) {

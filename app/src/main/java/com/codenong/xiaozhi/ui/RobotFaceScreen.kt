@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -64,6 +65,7 @@ fun RobotFaceScreen(
     hasMicPermission: Boolean,
     onRequestMicPermission: () -> Unit,
     onTapFace: () -> Unit,
+    onEndConversation: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onToggleHandsFreeWake: () -> Unit,
     onSelectWakeWord: (String) -> Unit,
@@ -267,6 +269,21 @@ fun RobotFaceScreen(
                     state.errorMessage?.let { err ->
                         Spacer(Modifier.height(8.dp))
                         Text(text = err, color = Color(0xFFFF7B72), fontSize = 13.sp)
+                    }
+                    if (state.deviceState == DeviceState.CONNECTING ||
+                        state.deviceState == DeviceState.LISTENING ||
+                        state.deviceState == DeviceState.SPEAKING
+                    ) {
+                        Spacer(Modifier.height(20.dp))
+                        Button(
+                            onClick = onEndConversation,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFDA3633),
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text("结束对话")
+                        }
                     }
                 }
             }

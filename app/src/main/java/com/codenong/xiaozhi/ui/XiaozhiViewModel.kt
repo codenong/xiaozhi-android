@@ -92,6 +92,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun onFaceTapped() = service?.onFaceTapped()
+    fun endConversation() = service?.endConversation()
     fun toggleAutoContinue() = service?.toggleAutoContinue()
     fun toggleHandsFreeWake() = service?.toggleHandsFreeWake()
     fun selectWakeWord(wakeWord: String) = service?.selectWakeWord(wakeWord)

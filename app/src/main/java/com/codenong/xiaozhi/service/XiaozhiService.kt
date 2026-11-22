@@ -106,6 +106,11 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                     handleWakeWordTriggered(keyword)
                 }
             },
+            onExitWordDetected = {
+                serviceScope.launch {
+                    handleExitWordTriggered()
+                }
+            },
             onVoiceActivity = { /* 可用于本地打断优化 */ }
         )
 
@@ -115,7 +120,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         startForegroundCompat("小智正在后台待机聆听")
 
         val identity = identityStore.getIdentity()
-        val entries = wakeWordDetector.loadEntriesFromAssets().map { it.displayName }
+        val entries = wakeWordDetector.loadWakeWordEntries().map { it.displayName }
         val savedWake = identityStore.getSelectedWakeWord()
         val effectiveWake = when {
             savedWake != null && entries.contains(savedWake) -> savedWake
@@ -209,6 +214,10 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun handleWakeWordTriggered(keyword: String) {
+        if (WakeWordDetector.isExitKeyword(keyword)) {
+            handleExitWordTriggered()
+            return
+        }
         val state = _uiState.value.deviceState
         if (state == DeviceState.IDLE) {
             pendingWakeKeyword = keyword
@@ -217,6 +226,19 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             wsClient.sendAbort("wake_word_detected")
             audioEngine.clearPlayback()
             startListeningInternal()
+        }
+    }
+
+    private fun handleExitWordTriggered() {
+        endConversation()
+    }
+
+    fun endConversation() {
+        when (_uiState.value.deviceState) {
+            DeviceState.CONNECTING,
+            DeviceState.LISTENING,
+            DeviceState.SPEAKING -> stopConversation()
+            else -> Unit
         }
     }
 
@@ -319,17 +341,19 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 deviceState = DeviceState.LISTENING,
                 emotion = "listening",
                 emoji = "👂",
-                subtitle = "我在听，请说话..."
+                subtitle = "我在听，请说话...（说「${WakeWordDetector.EXIT_KEYWORD}」结束）"
             )
         }
         updateNotification("正在聆听说话...")
         val mode = if (_uiState.value.autoContinue) "auto" else "manual"
         wsClient.sendStartListening(mode)
-        audioEngine.startConversationCapture()
+        audioEngine.startConversationCapture(_uiState.value.activeWakeWord.ifBlank { null })
     }
 
     private fun stopConversation() {
+        wsClient.sendAbort("user_exit")
         wsClient.sendStopListening()
+        audioEngine.clearPlayback()
         wsClient.disconnect()
         _uiState.update {
             it.copy(

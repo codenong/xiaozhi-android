@@ -20,6 +20,7 @@ class WakeWordDetector(
 ) {
     private var spotter: KeywordSpotter? = null
     private var stream: OnlineStream? = null
+    private var exitStream: OnlineStream? = null
     private var activeWakeWordName: String? = null
 
     @Volatile
@@ -27,6 +28,9 @@ class WakeWordDetector(
         private set
 
     fun isModelAvailable(): Boolean = true
+
+    fun loadWakeWordEntries(): List<WakeWordEntry> =
+        loadEntriesFromAssets().filterNot { isExitKeyword(it.displayName) }
 
     fun loadEntriesFromAssets(): List<WakeWordEntry> {
         return runCatching {
@@ -72,6 +76,7 @@ class WakeWordDetector(
             val kws = KeywordSpotter(assetManager = context.assets, config = config)
             spotter = kws
             stream = createStreamForSelection(kws, selectedWakeWord)
+            exitStream = createExitStream(kws)
             isInitialized = true
             true
         }.onFailure { err ->
@@ -90,7 +95,7 @@ class WakeWordDetector(
 
     private fun createStreamForSelection(kws: KeywordSpotter, displayName: String?): OnlineStream {
         if (!displayName.isNullOrBlank()) {
-            val entry = loadEntriesFromAssets().firstOrNull { it.displayName == displayName }
+            val entry = loadWakeWordEntries().firstOrNull { it.displayName == displayName }
             if (entry != null) {
                 val custom = kws.createStream(entry.rawLine)
                 if (custom.ptr != 0L) return custom
@@ -99,17 +104,39 @@ class WakeWordDetector(
         return kws.createStream()
     }
 
+    private fun createExitStream(kws: KeywordSpotter): OnlineStream? {
+        val entry = loadEntriesFromAssets().firstOrNull { isExitKeyword(it.displayName) } ?: return null
+        val custom = kws.createStream(entry.rawLine)
+        return if (custom.ptr != 0L) custom else null
+    }
+
     @Synchronized
     fun processPcm16(pcm: ShortArray, length: Int): String? {
         val kws = spotter ?: return null
         val s = stream ?: return null
+        return feedAndDecode(kws, s, pcm, length)
+    }
+
+    @Synchronized
+    fun processExitWordPcm16(pcm: ShortArray, length: Int): String? {
+        val kws = spotter ?: return null
+        val s = exitStream ?: return null
+        return feedAndDecode(kws, s, pcm, length)
+    }
+
+    private fun feedAndDecode(
+        kws: KeywordSpotter,
+        targetStream: OnlineStream,
+        pcm: ShortArray,
+        length: Int
+    ): String? {
         val floats = FloatArray(length) { pcm[it] / 32768.0f }
-        s.acceptWaveform(samples = floats, sampleRate = sampleRate)
-        while (kws.isReady(s)) {
-            kws.decode(s)
-            val result = kws.getResult(s)
+        targetStream.acceptWaveform(samples = floats, sampleRate = sampleRate)
+        while (kws.isReady(targetStream)) {
+            kws.decode(targetStream)
+            val result = kws.getResult(targetStream)
             if (result.keyword.isNotBlank()) {
-                kws.reset(s)
+                kws.reset(targetStream)
                 return result.keyword
             }
         }
@@ -119,8 +146,8 @@ class WakeWordDetector(
     @Synchronized
     fun reset() {
         val kws = spotter ?: return
-        val s = stream ?: return
-        kws.reset(s)
+        stream?.let { kws.reset(it) }
+        exitStream?.let { kws.reset(it) }
     }
 
     @Synchronized
@@ -128,13 +155,18 @@ class WakeWordDetector(
         isInitialized = false
         runCatching {
             stream?.release()
+            exitStream?.release()
             spotter?.release()
         }
         stream = null
+        exitStream = null
         spotter = null
     }
 
     companion object {
         private const val TAG = "WakeWordDetector"
+        const val EXIT_KEYWORD = "小智退下"
+
+        fun isExitKeyword(keyword: String): Boolean = keyword.trim() == EXIT_KEYWORD
     }
 }
