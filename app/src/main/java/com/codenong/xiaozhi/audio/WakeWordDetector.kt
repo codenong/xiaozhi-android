@@ -8,7 +8,6 @@ import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
-import java.io.File
 
 data class WakeWordEntry(
     val displayName: String,
@@ -19,7 +18,6 @@ class WakeWordDetector(
     private val context: Context,
     private val sampleRate: Int = 16000
 ) {
-    private val modelManager = KwsModelManager(context)
     private var spotter: KeywordSpotter? = null
     private var stream: OnlineStream? = null
     private var activeWakeWordName: String? = null
@@ -28,7 +26,7 @@ class WakeWordDetector(
     var isInitialized: Boolean = false
         private set
 
-    fun isModelAvailable(): Boolean = modelManager.isModelReady()
+    fun isModelAvailable(): Boolean = true
 
     fun loadEntriesFromAssets(): List<WakeWordEntry> {
         return runCatching {
@@ -52,24 +50,16 @@ class WakeWordDetector(
     fun initialize(selectedWakeWord: String? = activeWakeWordName): Boolean {
         activeWakeWordName = selectedWakeWord
         if (isInitialized) return true
-        if (!modelManager.isModelReady()) return false
 
         return runCatching {
-            val dir = modelManager.modelDir
-            dir.mkdirs()
-            val keywordsDest = File(dir, "keywords.txt")
-            context.assets.open("kws/keywords.txt").use { input ->
-                keywordsDest.outputStream().use { output -> input.copyTo(output) }
-            }
-
             val transducer = OnlineTransducerModelConfig(
-                encoder = File(dir, "encoder.onnx").absolutePath,
-                decoder = File(dir, "decoder.onnx").absolutePath,
-                joiner = File(dir, "joiner.onnx").absolutePath
+                encoder = "kws/encoder.onnx",
+                decoder = "kws/decoder.onnx",
+                joiner = "kws/joiner.onnx"
             )
             val modelConfig = OnlineModelConfig(
                 transducer = transducer,
-                tokens = File(dir, "tokens.txt").absolutePath,
+                tokens = "kws/tokens.txt",
                 numThreads = 2,
                 debug = false,
                 modelType = "zipformer2"
@@ -77,9 +67,9 @@ class WakeWordDetector(
             val config = KeywordSpotterConfig(
                 featConfig = FeatureConfig(sampleRate = sampleRate, featureDim = 80),
                 modelConfig = modelConfig,
-                keywordsFile = keywordsDest.absolutePath
+                keywordsFile = "kws/keywords.txt"
             )
-            val kws = KeywordSpotter(assetManager = null, config = config)
+            val kws = KeywordSpotter(assetManager = context.assets, config = config)
             spotter = kws
             stream = createStreamForSelection(kws, selectedWakeWord)
             isInitialized = true

@@ -80,7 +80,6 @@ class MainActivity : ComponentActivity() {
                 onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },
                 onSelectWakeWord = { viewModel.selectWakeWord(it) },
                 onSaveOtaUrl = { viewModel.updateOtaUrl(it) },
-                onDownloadKwsModel = { viewModel.downloadKwsModel(it) },
                 onSaveUpdateUrl = { viewModel.saveUpdateUrl(it) },
                 onCheckUpdate = { viewModel.checkForUpdate(silent = false) },
                 onDownloadUpdate = { viewModel.downloadAndInstallUpdate() },

@@ -68,7 +68,6 @@ fun RobotFaceScreen(
     onToggleHandsFreeWake: () -> Unit,
     onSelectWakeWord: (String) -> Unit,
     onSaveOtaUrl: (String) -> Unit,
-    onDownloadKwsModel: (String) -> Unit,
     onSaveUpdateUrl: (String) -> Unit,
     onCheckUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
@@ -101,10 +100,10 @@ fun RobotFaceScreen(
         }
     }
 
-    val activeWakeLabel = when {
-        !state.handsFreeWakeEnabled -> "已关闭"
-        !state.kwsModelReady -> "模型未下载"
-        else -> state.activeWakeWord.ifBlank { "全部" }
+    val activeWakeLabel = if (state.handsFreeWakeEnabled) {
+        state.activeWakeWord.ifBlank { "全部" }
+    } else {
+        "已关闭"
     }
 
     Box(
@@ -299,7 +298,6 @@ fun RobotFaceScreen(
     if (showSettings) {
         var draftOtaUrl by remember(state.otaUrl) { mutableStateOf(state.otaUrl) }
         var draftUpdateUrl by remember(updateState.updateUrl) { mutableStateOf(updateState.updateUrl) }
-        var draftKwsUrl by remember(state.kwsModelUrl) { mutableStateOf(state.kwsModelUrl) }
         var draftWakeWord by remember(state.activeWakeWord) { mutableStateOf(state.activeWakeWord) }
 
         AlertDialog(
@@ -344,32 +342,6 @@ fun RobotFaceScreen(
                     updateState.statusMessage?.let { msg ->
                         Spacer(Modifier.height(6.dp))
                         Text(msg, fontSize = 12.sp, color = Color(0xFF58A6FF))
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = draftKwsUrl,
-                        onValueChange = { draftKwsUrl = it },
-                        label = { Text("唤醒词模型地址 (kws-model.zip)") },
-                        placeholder = { Text("https://xxx.pages.dev/kws-model.zip") },
-                        singleLine = true
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(
-                            enabled = state.kwsDownloadProgress == null && draftKwsUrl.isNotBlank(),
-                            onClick = { onDownloadKwsModel(draftKwsUrl) }
-                        ) {
-                            Text(
-                                when {
-                                    state.kwsDownloadProgress != null -> "下载中 ${state.kwsDownloadProgress}%"
-                                    state.kwsModelReady -> "重新下载模型"
-                                    else -> "下载唤醒词模型"
-                                }
-                            )
-                        }
                     }
                     if (state.availableWakeWords.isNotEmpty()) {
                         Spacer(Modifier.height(16.dp))
