@@ -29,11 +29,21 @@ android {
     }
 
     buildTypes {
+        val keystorePath = System.getenv("XIAOZHI_KEYSTORE_FILE")
+        val sharedSigning = if (!keystorePath.isNullOrBlank()) {
+            signingConfigs.getByName("release")
+        } else {
+            null
+        }
+        debug {
+            if (sharedSigning != null) {
+                signingConfig = sharedSigning
+            }
+        }
         release {
             isMinifyEnabled = false
-            val keystorePath = System.getenv("XIAOZHI_KEYSTORE_FILE")
-            if (!keystorePath.isNullOrBlank()) {
-                signingConfig = signingConfigs.getByName("release")
+            if (sharedSigning != null) {
+                signingConfig = sharedSigning
             }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
