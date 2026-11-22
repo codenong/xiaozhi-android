@@ -1,0 +1,516 @@
+package com.codenong.xiaozhi.service
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
+import android.os.Binder
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import com.codenong.xiaozhi.MainActivity
+import com.codenong.xiaozhi.audio.AudioEngine
+import com.codenong.xiaozhi.audio.OpusCodec
+import com.codenong.xiaozhi.audio.WakeWordDetector
+import com.codenong.xiaozhi.data.DeviceIdentityStore
+import com.codenong.xiaozhi.mcp.McpServer
+import com.codenong.xiaozhi.model.ActivationInfo
+import com.codenong.xiaozhi.model.DeviceState
+import com.codenong.xiaozhi.model.WebSocketConfig
+import com.codenong.xiaozhi.network.OtaClient
+import com.codenong.xiaozhi.network.XiaozhiSocketListener
+import com.codenong.xiaozhi.network.XiaozhiWebSocketClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+
+data class XiaozhiUiState(
+    val deviceState: DeviceState = DeviceState.STARTING,
+    val emotion: String = "neutral",
+    val emoji: String = "🤖",
+    val subtitle: String = "正在初始化...",
+    val userSpeech: String = "",
+    val activation: ActivationInfo? = null,
+    val otaUrl: String = DeviceIdentityStore.DEFAULT_OTA_URL,
+    val deviceId: String = "",
+    val autoContinue: Boolean = true,
+    val handsFreeWakeEnabled: Boolean = true,
+    val availableWakeWords: List<String> = emptyList(),
+    val activeWakeWord: String = "",
+    val errorMessage: String? = null,
+    val brightnessPercent: Int? = null
+)
+
+class XiaozhiService : Service(), XiaozhiSocketListener {
+
+    inner class LocalBinder : Binder() {
+        fun getService(): XiaozhiService = this@XiaozhiService
+    }
+
+    private val binder = LocalBinder()
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    private lateinit var identityStore: DeviceIdentityStore
+    private val otaClient = OtaClient()
+    private val opusCodec = OpusCodec()
+    private lateinit var wakeWordDetector: WakeWordDetector
+    private lateinit var mcpServer: McpServer
+    private lateinit var wsClient: XiaozhiWebSocketClient
+    private lateinit var audioEngine: AudioEngine
+
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    private val _uiState = MutableStateFlow(XiaozhiUiState())
+    val uiState: StateFlow<XiaozhiUiState> = _uiState.asStateFlow()
+
+    private var cachedWsConfig: WebSocketConfig? = null
+    private var activationJob: Job? = null
+    private var hasMicPermission: Boolean = false
+    private var pendingWakeKeyword: String? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        identityStore = DeviceIdentityStore(applicationContext)
+        wakeWordDetector = WakeWordDetector(applicationContext)
+        mcpServer = McpServer(applicationContext) { brightness ->
+            _uiState.update { it.copy(brightnessPercent = brightness) }
+        }
+        wsClient = XiaozhiWebSocketClient(this)
+        audioEngine = AudioEngine(
+            scope = serviceScope,
+            opusCodec = opusCodec,
+            wakeWordDetector = wakeWordDetector,
+            onEncodedFrame = { opus ->
+                if (_uiState.value.deviceState == DeviceState.LISTENING) {
+                    wsClient.sendAudioFrame(opus)
+                }
+            },
+            onWakeWordDetected = { keyword ->
+                serviceScope.launch {
+                    handleWakeWordTriggered(keyword)
+                }
+            },
+            onVoiceActivity = { /* 可用于本地打断优化 */ }
+        )
+
+        createNotificationChannel()
+        startForegroundCompat("小智正在后台待机聆听")
+
+        val identity = identityStore.getIdentity()
+        val entries = wakeWordDetector.loadEntriesFromAssets().map { it.displayName }
+        val savedWake = identityStore.getSelectedWakeWord()
+        val effectiveWake = when {
+            savedWake != null && entries.contains(savedWake) -> savedWake
+            savedWake == "" && entries.isNotEmpty() -> ""
+            entries.isNotEmpty() -> entries.first()
+            else -> ""
+        }
+        _uiState.update {
+            it.copy(
+                otaUrl = identity.otaUrl,
+                deviceId = identity.deviceId,
+                availableWakeWords = entries,
+                activeWakeWord = effectiveWake
+            )
+        }
+        bootstrapOta()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder = binder
+
+    fun onMicPermissionChanged(granted: Boolean) {
+        hasMicPermission = granted
+        if (granted && _uiState.value.deviceState == DeviceState.IDLE) {
+            maybeStartWakeWordListening()
+        }
+    }
+
+    fun bootstrapOta() {
+        activationJob?.cancel()
+        serviceScope.launch {
+            _uiState.update {
+                it.copy(
+                    deviceState = DeviceState.STARTING,
+                    subtitle = "正在连接小智引导服务...",
+                    errorMessage = null
+                )
+            }
+            val identity = identityStore.getIdentity()
+            otaClient.fetchConfig(identity)
+                .onSuccess { res ->
+                    cachedWsConfig = res.webSocket
+                    if (res.activation != null) {
+                        _uiState.update {
+                            it.copy(
+                                deviceState = DeviceState.ACTIVATING,
+                                activation = res.activation,
+                                subtitle = "请在 xiaozhi.me 控制台输入激活码绑定此设备"
+                            )
+                        }
+                        startActivationPolling()
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                deviceState = DeviceState.IDLE,
+                                activation = null,
+                                subtitle = idleHint()
+                            )
+                        }
+                        maybeStartWakeWordListening()
+                    }
+                }
+                .onFailure { err ->
+                    _uiState.update {
+                        it.copy(
+                            deviceState = DeviceState.ERROR,
+                            errorMessage = err.message ?: "网络请求失败",
+                            subtitle = "连接引导服务失败，请检查网络或 OTA 地址"
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun startActivationPolling() {
+        activationJob?.cancel()
+        activationJob = serviceScope.launch {
+            val identity = identityStore.getIdentity()
+            while (true) {
+                delay(3000)
+                val bound = otaClient.checkActivation(identity).getOrNull() ?: false
+                if (bound) {
+                    bootstrapOta()
+                    break
+                }
+            }
+        }
+    }
+
+    private fun handleWakeWordTriggered(keyword: String) {
+        val state = _uiState.value.deviceState
+        if (state == DeviceState.IDLE) {
+            pendingWakeKeyword = keyword
+            startConversation()
+        } else if (state == DeviceState.SPEAKING) {
+            wsClient.sendAbort("wake_word_detected")
+            audioEngine.clearPlayback()
+            startListeningInternal()
+        }
+    }
+
+    fun onFaceTapped() {
+        when (_uiState.value.deviceState) {
+            DeviceState.IDLE -> {
+                pendingWakeKeyword = null
+                startConversation()
+            }
+            DeviceState.LISTENING -> stopConversation()
+            DeviceState.SPEAKING -> {
+                wsClient.sendAbort("user_interrupt")
+                audioEngine.clearPlayback()
+                startListeningInternal()
+            }
+            DeviceState.ERROR -> bootstrapOta()
+            else -> Unit
+        }
+    }
+
+    fun toggleAutoContinue() {
+        _uiState.update { it.copy(autoContinue = !it.autoContinue) }
+    }
+
+    fun toggleHandsFreeWake() {
+        val next = !_uiState.value.handsFreeWakeEnabled
+        _uiState.update {
+            it.copy(
+                handsFreeWakeEnabled = next,
+                subtitle = if (_uiState.value.deviceState == DeviceState.IDLE) idleHint(next) else it.subtitle
+            )
+        }
+        if (_uiState.value.deviceState == DeviceState.IDLE) {
+            if (next) {
+                maybeStartWakeWordListening()
+            } else {
+                audioEngine.stopCapture()
+                releaseLocks()
+            }
+        }
+    }
+
+    fun selectWakeWord(wakeWord: String) {
+        identityStore.setSelectedWakeWord(wakeWord)
+        audioEngine.updateSelectedWakeWord(wakeWord.ifBlank { null })
+        _uiState.update { state ->
+            state.copy(
+                activeWakeWord = wakeWord,
+                subtitle = if (state.deviceState == DeviceState.IDLE) {
+                    idleHint(state.handsFreeWakeEnabled, wakeWord)
+                } else {
+                    state.subtitle
+                }
+            )
+        }
+    }
+
+    fun updateOtaUrl(newUrl: String) {
+        identityStore.updateOtaUrl(newUrl)
+        val identity = identityStore.getIdentity()
+        _uiState.update { it.copy(otaUrl = identity.otaUrl) }
+        bootstrapOta()
+    }
+
+    private fun maybeStartWakeWordListening() {
+        if (hasMicPermission && _uiState.value.handsFreeWakeEnabled) {
+            acquireLocks()
+            val active = _uiState.value.activeWakeWord.ifBlank { null }
+            audioEngine.startWakeWordDetection(active)
+            updateNotification("锁屏待机中 · 喊「${active ?: "唤醒词"}」开始对话")
+        }
+    }
+
+    private fun idleHint(
+        wakeEnabled: Boolean = _uiState.value.handsFreeWakeEnabled,
+        wakeWord: String = _uiState.value.activeWakeWord
+    ): String {
+        if (!wakeEnabled) return "点击屏幕开始对话"
+        val label = wakeWord.ifBlank { _uiState.value.availableWakeWords.joinToString(" / ").ifBlank { "唤醒词" } }
+        return "喊「$label」或点击屏幕唤醒（锁屏可用）"
+    }
+
+    private fun startConversation() {
+        val ws = cachedWsConfig
+        if (ws == null || ws.url.isBlank()) {
+            bootstrapOta()
+            return
+        }
+        acquireLocks()
+        _uiState.update {
+            it.copy(deviceState = DeviceState.CONNECTING, subtitle = "正在连接语音网关...")
+        }
+        updateNotification("正在连接小智语音网关...")
+        wsClient.connect(identityStore.getIdentity(), ws)
+    }
+
+    private fun startListeningInternal() {
+        _uiState.update {
+            it.copy(
+                deviceState = DeviceState.LISTENING,
+                emotion = "listening",
+                emoji = "👂",
+                subtitle = "我在听，请说话..."
+            )
+        }
+        updateNotification("正在聆听说话...")
+        val mode = if (_uiState.value.autoContinue) "auto" else "manual"
+        wsClient.sendStartListening(mode)
+        audioEngine.startConversationCapture()
+    }
+
+    private fun stopConversation() {
+        wsClient.sendStopListening()
+        wsClient.disconnect()
+        _uiState.update {
+            it.copy(
+                deviceState = DeviceState.IDLE,
+                emotion = "neutral",
+                emoji = "🤖",
+                subtitle = idleHint()
+            )
+        }
+        if (_uiState.value.handsFreeWakeEnabled) {
+            maybeStartWakeWordListening()
+        } else {
+            audioEngine.stopCapture()
+            releaseLocks()
+            updateNotification("小智已待机")
+        }
+    }
+
+    override fun onServerHello(sessionId: String, outputSampleRate: Int) {
+        audioEngine.ensurePlaybackStarted(outputSampleRate)
+        pendingWakeKeyword?.let { kw ->
+            wsClient.sendWakeWordDetected(kw)
+            pendingWakeKeyword = null
+        }
+        startListeningInternal()
+    }
+
+    override fun onSttText(text: String) {
+        _uiState.update { it.copy(userSpeech = text) }
+    }
+
+    override fun onLlmEmotion(emotion: String, emojiText: String) {
+        _uiState.update {
+            it.copy(
+                emotion = emotion.ifBlank { it.emotion },
+                emoji = emojiText.ifBlank { it.emoji }
+            )
+        }
+    }
+
+    override fun onTtsStart() {
+        if (_uiState.value.handsFreeWakeEnabled && hasMicPermission) {
+            maybeStartWakeWordListening()
+        } else {
+            audioEngine.stopCapture()
+        }
+        _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
+        updateNotification("小智正在回复...")
+    }
+
+    override fun onTtsStop() {
+        if (_uiState.value.autoContinue) {
+            startListeningInternal()
+        } else {
+            _uiState.update {
+                it.copy(deviceState = DeviceState.IDLE, emoji = "🤖", subtitle = idleHint())
+            }
+            maybeStartWakeWordListening()
+        }
+    }
+
+    override fun onTtsSentence(text: String) {
+        _uiState.update { it.copy(subtitle = text) }
+    }
+
+    override fun onAudioPacket(opusBytes: ByteArray) {
+        if (_uiState.value.deviceState != DeviceState.LISTENING) {
+            audioEngine.enqueueAudioPacket(opusBytes)
+        }
+    }
+
+    override fun onMcpRequest(payload: JSONObject) {
+        mcpServer.handleRequest(payload)?.let { response ->
+            wsClient.sendMcpResponse(response)
+        }
+    }
+
+    override fun onAlert(status: String, message: String, emotion: String) {
+        _uiState.update {
+            it.copy(subtitle = "[$status] $message", emotion = emotion.ifBlank { "neutral" })
+        }
+    }
+
+    override fun onClosed(reason: String) {
+        _uiState.update {
+            it.copy(
+                deviceState = DeviceState.IDLE,
+                emoji = "🤖",
+                subtitle = idleHint()
+            )
+        }
+        if (_uiState.value.handsFreeWakeEnabled) {
+            maybeStartWakeWordListening()
+        } else {
+            audioEngine.stopCapture()
+            releaseLocks()
+            updateNotification("小智已待机")
+        }
+    }
+
+    private fun acquireLocks() {
+        if (wakeLock?.isHeld != true) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "xiaozhi:WakeWordLock").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
+        if (wifiLock?.isHeld != true) {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION")
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wifiLock = wm.createWifiLock(mode, "xiaozhi:WifiLock").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
+    }
+
+    private fun releaseLocks() {
+        runCatching {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        }
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "小智语音服务",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "支持在锁屏和熄屏状态下继续与小智语音对话"
+        }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun buildNotification(contentText: String): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("小智 AI")
+            .setContentText(contentText)
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+    }
+
+    private fun startForegroundCompat(contentText: String) {
+        val notification = buildNotification(contentText)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun updateNotification(contentText: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, buildNotification(contentText))
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        activationJob?.cancel()
+        wsClient.disconnect()
+        audioEngine.release()
+        releaseLocks()
+        serviceScope.cancel()
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "xiaozhi_voice_channel"
+        private const val NOTIFICATION_ID = 1001
+    }
+}

@@ -2,8 +2,8 @@ package com.codenong.xiaozhi
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -25,7 +25,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContent {
             val state by viewModel.uiState.collectAsState()
@@ -38,17 +37,28 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            val permissionsToRequest = remember {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    arrayOf(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+
             val launcher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission()
-            ) { granted ->
-                hasMicPermission = granted
-                viewModel.onMicPermissionChanged(granted)
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) { results ->
+                val micGranted = results[Manifest.permission.RECORD_AUDIO] ?: hasMicPermission
+                hasMicPermission = micGranted
+                viewModel.onMicPermissionChanged(micGranted)
             }
 
             LaunchedEffect(hasMicPermission) {
-                viewModel.onMicPermissionChanged(hasMicPermission)
-                if (!hasMicPermission) {
-                    launcher.launch(Manifest.permission.RECORD_AUDIO)
+                if (hasMicPermission) {
+                    viewModel.startAndBindService()
+                    viewModel.onMicPermissionChanged(true)
+                } else {
+                    launcher.launch(permissionsToRequest)
                 }
             }
 
@@ -62,7 +72,7 @@ class MainActivity : ComponentActivity() {
             RobotFaceScreen(
                 state = state,
                 hasMicPermission = hasMicPermission,
-                onRequestMicPermission = { launcher.launch(Manifest.permission.RECORD_AUDIO) },
+                onRequestMicPermission = { launcher.launch(permissionsToRequest) },
                 onTapFace = { viewModel.onFaceTapped() },
                 onToggleAutoContinue = { viewModel.toggleAutoContinue() },
                 onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },

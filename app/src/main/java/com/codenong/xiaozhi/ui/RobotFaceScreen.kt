@@ -2,6 +2,7 @@ package com.codenong.xiaozhi.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.codenong.xiaozhi.model.DeviceState
+import com.codenong.xiaozhi.service.XiaozhiUiState
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -238,6 +240,14 @@ fun RobotFaceScreen(
                         label = { Text("OTA 服务器地址") },
                         singleLine = true
                     )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        }
+                    }) {
+                        Text("锁屏保活：去关闭电池优化")
+                    }
                     if (state.availableWakeWords.isNotEmpty()) {
                         Spacer(Modifier.height(16.dp))
                         Text("选择唤醒词（来自 keywords.txt）", fontSize = 13.sp, fontWeight = FontWeight.Medium)
