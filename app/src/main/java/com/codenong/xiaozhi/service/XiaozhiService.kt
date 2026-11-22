@@ -8,6 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
@@ -75,6 +78,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private lateinit var batteryAlertMonitor: BatteryAlertMonitor
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile
+    private var isNetworkAvailable: Boolean = true
+    @Volatile
+    private var isUserDisconnecting: Boolean = false
 
     private val _uiState = MutableStateFlow(XiaozhiUiState())
     val uiState: StateFlow<XiaozhiUiState> = _uiState.asStateFlow()
@@ -116,6 +125,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
         batteryAlertMonitor = BatteryAlertMonitor(applicationContext)
         batteryAlertMonitor.start()
+        registerNetworkMonitor()
         createNotificationChannel()
         startForegroundCompat("小智正在后台待机聆听")
 
@@ -215,7 +225,10 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     private fun handleWakeWordTriggered(keyword: String) {
         if (WakeWordDetector.isExitKeyword(keyword)) {
-            handleExitWordTriggered()
+            val state = _uiState.value.deviceState
+            if (state == DeviceState.LISTENING || state == DeviceState.SPEAKING) {
+                handleExitWordTriggered()
+            }
             return
         }
         val state = _uiState.value.deviceState
@@ -307,6 +320,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         if (hasMicPermission && _uiState.value.handsFreeWakeEnabled) {
             acquireLocks()
             val active = _uiState.value.activeWakeWord.ifBlank { null }
+            audioEngine.exitWordEnabled = _uiState.value.deviceState == DeviceState.SPEAKING
             audioEngine.startWakeWordDetection(active)
             updateNotification("锁屏待机中 · 喊「${active ?: "唤醒词"}」开始对话")
         }
@@ -322,26 +336,45 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun startConversation() {
+        if (!isNetworkAvailable) {
+            _uiState.update {
+                it.copy(
+                    deviceState = DeviceState.IDLE,
+                    subtitle = "当前无网络连接，请检查 Wi-Fi",
+                    errorMessage = "网络已断开，无法连接小智服务"
+                )
+            }
+            updateNotification("网络已断开，无法使用")
+            return
+        }
         val ws = cachedWsConfig
         if (ws == null || ws.url.isBlank()) {
             bootstrapOta()
             return
         }
+        isUserDisconnecting = false
+        audioEngine.exitWordEnabled = false
         acquireLocks()
         _uiState.update {
-            it.copy(deviceState = DeviceState.CONNECTING, subtitle = "正在连接语音网关...")
+            it.copy(
+                deviceState = DeviceState.CONNECTING,
+                subtitle = "正在连接语音网关...",
+                errorMessage = null
+            )
         }
         updateNotification("正在连接小智语音网关...")
         wsClient.connect(identityStore.getIdentity(), ws)
     }
 
     private fun startListeningInternal() {
+        audioEngine.exitWordEnabled = true
         _uiState.update {
             it.copy(
                 deviceState = DeviceState.LISTENING,
                 emotion = "listening",
                 emoji = "👂",
-                subtitle = "我在听，请说话...（说「${WakeWordDetector.EXIT_KEYWORD}」结束）"
+                subtitle = "我在听，请说话...（说「${WakeWordDetector.EXIT_KEYWORD}」结束）",
+                errorMessage = null
             )
         }
         updateNotification("正在聆听说话...")
@@ -351,6 +384,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun stopConversation() {
+        isUserDisconnecting = true
+        audioEngine.exitWordEnabled = false
         wsClient.sendAbort("user_exit")
         wsClient.sendStopListening()
         audioEngine.clearPlayback()
@@ -360,7 +395,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 deviceState = DeviceState.IDLE,
                 emotion = "neutral",
                 emoji = "🤖",
-                subtitle = idleHint()
+                subtitle = idleHint(),
+                errorMessage = if (isNetworkAvailable) null else "网络已断开，无法连接小智服务"
             )
         }
         if (_uiState.value.handsFreeWakeEnabled) {
@@ -395,12 +431,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onTtsStart() {
+        _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
+        audioEngine.exitWordEnabled = true
         if (_uiState.value.handsFreeWakeEnabled && hasMicPermission) {
             maybeStartWakeWordListening()
         } else {
             audioEngine.stopCapture()
         }
-        _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
         updateNotification("小智正在回复...")
     }
 
@@ -437,21 +474,80 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
     }
 
-    override fun onClosed(reason: String) {
+    override fun onClosed(reason: String, isError: Boolean) {
+        audioEngine.exitWordEnabled = false
+        val userEnded = isUserDisconnecting
+        isUserDisconnecting = false
+        val showDisconnectError = !userEnded && (isError || !isNetworkAvailable)
+        val errText = if (showDisconnectError) {
+            if (!isNetworkAvailable) "网络已断开，请检查 Wi-Fi 或移动网络" else "连接已断开：$reason"
+        } else {
+            null
+        }
         _uiState.update {
             it.copy(
                 deviceState = DeviceState.IDLE,
                 emoji = "🤖",
-                subtitle = idleHint()
+                subtitle = if (showDisconnectError) "网络异常，连接已断开" else idleHint(),
+                errorMessage = errText
             )
         }
         if (_uiState.value.handsFreeWakeEnabled) {
             maybeStartWakeWordListening()
+            if (showDisconnectError) {
+                updateNotification("网络已断开，等待恢复")
+            }
         } else {
             audioEngine.stopCapture()
             releaseLocks()
-            updateNotification("小智已待机")
+            updateNotification(if (showDisconnectError) "网络已断开" else "小智已待机")
         }
+    }
+
+    private fun registerNetworkMonitor() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        connectivityManager = cm
+        val activeCaps = cm.getNetworkCapabilities(cm.activeNetwork)
+        isNetworkAvailable = activeCaps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        if (!isNetworkAvailable) {
+            _uiState.update { it.copy(errorMessage = "当前无网络连接，请检查 Wi-Fi 或移动网络") }
+        }
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                serviceScope.launch {
+                    isNetworkAvailable = true
+                    _uiState.update { state ->
+                        if (state.errorMessage?.contains("网络") == true || state.errorMessage?.contains("连接") == true) {
+                            state.copy(
+                                errorMessage = null,
+                                subtitle = if (state.deviceState == DeviceState.IDLE) idleHint() else state.subtitle
+                            )
+                        } else {
+                            state
+                        }
+                    }
+                    if (_uiState.value.deviceState == DeviceState.ERROR) {
+                        bootstrapOta()
+                    }
+                }
+            }
+
+            override fun onLost(network: Network) {
+                serviceScope.launch {
+                    val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+                    val stillOnline = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    isNetworkAvailable = stillOnline
+                    if (!stillOnline) {
+                        _uiState.update {
+                            it.copy(errorMessage = "当前无网络连接，请检查 Wi-Fi 或移动网络")
+                        }
+                        updateNotification("网络已断开，无法使用")
+                    }
+                }
+            }
+        }
+        networkCallback = cb
+        runCatching { cm.registerDefaultNetworkCallback(cb) }
     }
 
     private fun acquireLocks() {
@@ -529,6 +625,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        networkCallback?.let { cb ->
+            runCatching { connectivityManager?.unregisterNetworkCallback(cb) }
+        }
         batteryAlertMonitor.stop()
         activationJob?.cancel()
         wsClient.disconnect()

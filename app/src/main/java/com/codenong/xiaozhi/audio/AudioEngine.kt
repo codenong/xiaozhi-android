@@ -47,6 +47,12 @@ class AudioEngine(
     var captureMode: CaptureMode = CaptureMode.OFF
         private set
 
+    @Volatile
+    var exitWordEnabled: Boolean = false
+
+    @Volatile
+    private var exitWordCooldownUntilMs: Long = 0L
+
     fun startWakeWordDetection(selectedWakeWord: String? = null) {
         if (!wakeWordDetector.initialize(selectedWakeWord)) return
         wakeWordDetector.reset()
@@ -61,6 +67,7 @@ class AudioEngine(
     fun startConversationCapture(selectedWakeWord: String? = null) {
         wakeWordDetector.initialize(selectedWakeWord)
         wakeWordDetector.reset()
+        exitWordCooldownUntilMs = System.currentTimeMillis() + 800L
         captureMode = CaptureMode.CONVERSATION
         ensureCaptureLoopRunning()
     }
@@ -127,7 +134,7 @@ class AudioEngine(
                         val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
                         if (keyword != null) {
                             onWakeWordDetected(keyword)
-                        } else {
+                        } else if (exitWordEnabled) {
                             val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
                             if (exitKeyword != null) {
                                 onExitWordDetected(exitKeyword)
@@ -136,10 +143,12 @@ class AudioEngine(
                     }
 
                     CaptureMode.CONVERSATION -> {
-                        val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
-                        if (exitKeyword != null) {
-                            onExitWordDetected(exitKeyword)
-                            continue
+                        if (exitWordEnabled && System.currentTimeMillis() >= exitWordCooldownUntilMs) {
+                            val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
+                            if (exitKeyword != null) {
+                                onExitWordDetected(exitKeyword)
+                                continue
+                            }
                         }
                         val avgAmp = pcmBuffer.fold(0L) { acc, s -> acc + abs(s.toInt()) } / frameSamples
                         val vad = avgAmp > 350

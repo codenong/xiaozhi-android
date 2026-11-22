@@ -22,7 +22,7 @@ interface XiaozhiSocketListener {
     fun onAudioPacket(opusBytes: ByteArray)
     fun onMcpRequest(payload: JSONObject)
     fun onAlert(status: String, message: String, emotion: String)
-    fun onClosed(reason: String)
+    fun onClosed(reason: String, isError: Boolean)
 }
 
 class XiaozhiWebSocketClient(
@@ -58,23 +58,34 @@ class XiaozhiWebSocketClient(
 
         webSocket = client.newWebSocket(reqBuilder.build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
                 sendHello(config.version)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
                 handleJsonMessage(text)
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
                 listener.onAudioPacket(bytes.toByteArray())
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                listener.onClosed(t.message ?: "WebSocket connection failed")
+                if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
+                this@XiaozhiWebSocketClient.webSocket = null
+                sessionId = ""
+                val detail = t.message ?: response?.message ?: "无法连接语音服务器"
+                listener.onClosed(detail, true)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                listener.onClosed(reason.ifEmpty { "Closed ($code)" })
+                if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
+                this@XiaozhiWebSocketClient.webSocket = null
+                sessionId = ""
+                val isError = code != 1000
+                listener.onClosed(reason.ifEmpty { "连接已断开 ($code)" }, isError)
             }
         })
     }
