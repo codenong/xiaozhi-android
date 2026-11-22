@@ -1,7 +1,9 @@
 package com.codenong.xiaozhi.ui
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,6 +32,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.codenong.xiaozhi.model.DeviceState
 import com.codenong.xiaozhi.service.XiaozhiUiState
 
@@ -62,6 +68,29 @@ fun RobotFaceScreen(
     var showSettings by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun checkBatteryIgnored(): Boolean {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    var isBatteryIgnored by remember { mutableStateOf(checkBatteryIgnored()) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isBatteryIgnored = checkBatteryIgnored()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val openBatterySettings = {
+        runCatching {
+            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+    }
 
     val activeWakeLabel = if (state.handsFreeWakeEnabled) {
         state.activeWakeWord.ifBlank { "全部" }
@@ -148,7 +177,7 @@ fun RobotFaceScreen(
                             textAlign = TextAlign.Center,
                             fontSize = 14.sp
                         )
-                        Spacer(Modifier.height(24.dp))
+                        Spacer(Modifier.height(20.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(onClick = {
                                 clipboard.setText(AnnotatedString(state.activation.code))
@@ -160,6 +189,41 @@ fun RobotFaceScreen(
                                 context.startActivity(intent)
                             }) {
                                 Text("打开 xiaozhi.me")
+                            }
+                        }
+
+                        Spacer(Modifier.height(20.dp))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2630)),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (isBatteryIgnored) "✓ 锁屏保活已开启" else "锁屏保活未开启",
+                                        color = if (isBatteryIgnored) Color(0xFF3FB950) else Color(0xFFF0883E),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "关闭电池优化后，锁屏/熄屏也能继续唤醒对话",
+                                        color = Color(0xFF8B949E),
+                                        fontSize = 12.sp
+                                    )
+                                }
+                                if (!isBatteryIgnored) {
+                                    Spacer(Modifier.width(12.dp))
+                                    OutlinedButton(onClick = { openBatterySettings() }) {
+                                        Text("去开启", color = Color(0xFF58A6FF), fontSize = 13.sp)
+                                    }
+                                }
                             }
                         }
                     }
@@ -241,12 +305,8 @@ fun RobotFaceScreen(
                         singleLine = true
                     )
                     Spacer(Modifier.height(12.dp))
-                    OutlinedButton(onClick = {
-                        runCatching {
-                            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                        }
-                    }) {
-                        Text("锁屏保活：去关闭电池优化")
+                    OutlinedButton(onClick = { openBatterySettings() }) {
+                        Text(if (isBatteryIgnored) "✓ 锁屏保活已开启" else "锁屏保活：去关闭电池优化")
                     }
                     if (state.availableWakeWords.isNotEmpty()) {
                         Spacer(Modifier.height(16.dp))
