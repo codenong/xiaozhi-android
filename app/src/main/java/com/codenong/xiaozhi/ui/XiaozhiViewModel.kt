@@ -96,6 +96,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     fun toggleHandsFreeWake() = service?.toggleHandsFreeWake()
     fun selectWakeWord(wakeWord: String) = service?.selectWakeWord(wakeWord)
     fun updateOtaUrl(newUrl: String) = service?.updateOtaUrl(newUrl)
+    fun downloadKwsModel(url: String) = service?.downloadKwsModel(url)
 
     fun saveUpdateUrl(url: String) {
         identityStore.setUpdateCheckUrl(url)

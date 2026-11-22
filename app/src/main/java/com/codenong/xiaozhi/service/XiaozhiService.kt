@@ -16,6 +16,7 @@ import android.os.PowerManager
 import com.codenong.xiaozhi.MainActivity
 import com.codenong.xiaozhi.audio.AudioEngine
 import com.codenong.xiaozhi.audio.OpusCodec
+import com.codenong.xiaozhi.audio.KwsModelManager
 import com.codenong.xiaozhi.audio.WakeWordDetector
 import com.codenong.xiaozhi.data.DeviceIdentityStore
 import com.codenong.xiaozhi.mcp.McpServer
@@ -51,6 +52,9 @@ data class XiaozhiUiState(
     val handsFreeWakeEnabled: Boolean = true,
     val availableWakeWords: List<String> = emptyList(),
     val activeWakeWord: String = "",
+    val kwsModelReady: Boolean = false,
+    val kwsDownloadProgress: Int? = null,
+    val kwsModelUrl: String = "",
     val errorMessage: String? = null,
     val brightnessPercent: Int? = null
 )
@@ -68,6 +72,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private val otaClient = OtaClient()
     private val opusCodec = OpusCodec()
     private lateinit var wakeWordDetector: WakeWordDetector
+    private lateinit var kwsModelManager: KwsModelManager
     private lateinit var mcpServer: McpServer
     private lateinit var wsClient: XiaozhiWebSocketClient
     private lateinit var audioEngine: AudioEngine
@@ -86,6 +91,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     override fun onCreate() {
         super.onCreate()
         identityStore = DeviceIdentityStore(applicationContext)
+        kwsModelManager = KwsModelManager(applicationContext)
         wakeWordDetector = WakeWordDetector(applicationContext)
         mcpServer = McpServer(applicationContext) { brightness ->
             _uiState.update { it.copy(brightnessPercent = brightness) }
@@ -125,8 +131,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 otaUrl = identity.otaUrl,
                 deviceId = identity.deviceId,
                 availableWakeWords = entries,
-                activeWakeWord = effectiveWake
+                activeWakeWord = effectiveWake,
+                kwsModelReady = kwsModelManager.isModelReady(),
+                kwsModelUrl = identityStore.getKwsModelUrl()
             )
+        }
+        if (!kwsModelManager.isModelReady() && identityStore.getKwsModelUrl().isNotBlank()) {
+            downloadKwsModel(identityStore.getKwsModelUrl())
         }
         bootstrapOta()
     }
@@ -271,6 +282,37 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
     }
 
+    fun downloadKwsModel(url: String) {
+        val trimmed = url.trim()
+        identityStore.setKwsModelUrl(trimmed)
+        _uiState.update { it.copy(kwsModelUrl = trimmed) }
+        if (trimmed.isEmpty() || _uiState.value.kwsDownloadProgress != null) return
+        serviceScope.launch {
+            _uiState.update { it.copy(kwsDownloadProgress = 0, errorMessage = null) }
+            kwsModelManager.downloadAndExtract(trimmed) { progress ->
+                _uiState.update { it.copy(kwsDownloadProgress = progress) }
+            }.onSuccess {
+                _uiState.update {
+                    it.copy(
+                        kwsModelReady = true,
+                        kwsDownloadProgress = null,
+                        subtitle = if (it.deviceState == DeviceState.IDLE) idleHint() else it.subtitle
+                    )
+                }
+                if (_uiState.value.deviceState == DeviceState.IDLE) {
+                    maybeStartWakeWordListening()
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        kwsDownloadProgress = null,
+                        errorMessage = "唤醒词模型下载失败: ${err.message}"
+                    )
+                }
+            }
+        }
+    }
+
     fun updateOtaUrl(newUrl: String) {
         identityStore.updateOtaUrl(newUrl)
         val identity = identityStore.getIdentity()
@@ -279,7 +321,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun maybeStartWakeWordListening() {
-        if (hasMicPermission && _uiState.value.handsFreeWakeEnabled) {
+        if (hasMicPermission && _uiState.value.handsFreeWakeEnabled && wakeWordDetector.isModelAvailable()) {
             acquireLocks()
             val active = _uiState.value.activeWakeWord.ifBlank { null }
             audioEngine.startWakeWordDetection(active)
@@ -292,6 +334,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         wakeWord: String = _uiState.value.activeWakeWord
     ): String {
         if (!wakeEnabled) return "点击屏幕开始对话"
+        if (!wakeWordDetector.isModelAvailable()) return "点击屏幕开始对话（待下载唤醒词模型）"
         val label = wakeWord.ifBlank { _uiState.value.availableWakeWords.joinToString(" / ").ifBlank { "唤醒词" } }
         return "喊「$label」或点击屏幕唤醒（锁屏可用）"
     }
