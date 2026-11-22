@@ -9,18 +9,44 @@ import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 
+data class WakeWordEntry(
+    val displayName: String,
+    val rawLine: String
+)
+
 class WakeWordDetector(
     private val context: Context,
     private val sampleRate: Int = 16000
 ) {
     private var spotter: KeywordSpotter? = null
     private var stream: OnlineStream? = null
+    private var activeWakeWordName: String? = null
 
     @Volatile
     var isInitialized: Boolean = false
         private set
 
-    fun initialize(): Boolean {
+    fun loadEntriesFromAssets(): List<WakeWordEntry> {
+        return runCatching {
+            context.assets.open("kws/keywords.txt").bufferedReader().useLines { lines ->
+                lines.map { it.trim() }
+                    .filter { it.isNotEmpty() && !it.startsWith("#") }
+                    .mapNotNull { line ->
+                        val atIdx = line.lastIndexOf('@')
+                        val display = if (atIdx >= 0 && atIdx + 1 < line.length) {
+                            line.substring(atIdx + 1).trim()
+                        } else {
+                            line
+                        }
+                        if (display.isNotEmpty()) WakeWordEntry(display, line) else null
+                    }
+                    .toList()
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun initialize(selectedWakeWord: String? = activeWakeWordName): Boolean {
+        activeWakeWordName = selectedWakeWord
         if (isInitialized) return true
         return runCatching {
             val transducer = OnlineTransducerModelConfig(
@@ -41,14 +67,33 @@ class WakeWordDetector(
                 keywordsFile = "kws/keywords.txt"
             )
             val kws = KeywordSpotter(assetManager = context.assets, config = config)
-            val s = kws.createStream()
             spotter = kws
-            stream = s
+            stream = createStreamForSelection(kws, selectedWakeWord)
             isInitialized = true
             true
         }.onFailure { err ->
             Log.e(TAG, "Failed to initialize Sherpa-ONNX KWS: ${err.message}", err)
         }.getOrDefault(false)
+    }
+
+    @Synchronized
+    fun setActiveWakeWord(displayName: String?) {
+        activeWakeWordName = displayName
+        val kws = spotter ?: return
+        val oldStream = stream
+        stream = createStreamForSelection(kws, displayName)
+        oldStream?.release()
+    }
+
+    private fun createStreamForSelection(kws: KeywordSpotter, displayName: String?): OnlineStream {
+        if (!displayName.isNullOrBlank()) {
+            val entry = loadEntriesFromAssets().firstOrNull { it.displayName == displayName }
+            if (entry != null) {
+                val custom = kws.createStream(entry.rawLine)
+                if (custom.ptr != 0L) return custom
+            }
+        }
+        return kws.createStream()
     }
 
     @Synchronized

@@ -46,11 +46,15 @@ class AudioEngine(
     var captureMode: CaptureMode = CaptureMode.OFF
         private set
 
-    fun startWakeWordDetection() {
-        if (!wakeWordDetector.initialize()) return
+    fun startWakeWordDetection(selectedWakeWord: String? = null) {
+        if (!wakeWordDetector.initialize(selectedWakeWord)) return
         wakeWordDetector.reset()
         captureMode = CaptureMode.WAKE_WORD
         ensureCaptureLoopRunning()
+    }
+
+    fun updateSelectedWakeWord(selectedWakeWord: String?) {
+        wakeWordDetector.setActiveWakeWord(selectedWakeWord)
     }
 
     fun startConversationCapture() {

@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +22,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -42,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.codenong.xiaozhi.model.DeviceState
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RobotFaceScreen(
     state: XiaozhiUiState,
@@ -50,11 +54,18 @@ fun RobotFaceScreen(
     onTapFace: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onToggleHandsFreeWake: () -> Unit,
+    onSelectWakeWord: (String) -> Unit,
     onSaveOtaUrl: (String) -> Unit
 ) {
     var showSettings by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+
+    val activeWakeLabel = if (state.handsFreeWakeEnabled) {
+        state.activeWakeWord.ifBlank { "全部" }
+    } else {
+        "已关闭"
+    }
 
     Box(
         modifier = Modifier
@@ -70,7 +81,7 @@ fun RobotFaceScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "小智 AI · ${state.deviceState.name}",
+                text = "小智 AI · ${state.deviceState.name} · 唤醒词: $activeWakeLabel",
                 color = Color(0xFF8B949E),
                 fontSize = 14.sp
             )
@@ -187,7 +198,6 @@ fun RobotFaceScreen(
             }
         }
 
-        // 底部对话与唤醒模式控制
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -213,6 +223,8 @@ fun RobotFaceScreen(
 
     if (showSettings) {
         var draftUrl by remember(state.otaUrl) { mutableStateOf(state.otaUrl) }
+        var draftWakeWord by remember(state.activeWakeWord) { mutableStateOf(state.activeWakeWord) }
+
         AlertDialog(
             onDismissRequest = { showSettings = false },
             title = { Text("高级设置") },
@@ -226,14 +238,41 @@ fun RobotFaceScreen(
                         label = { Text("OTA 服务器地址") },
                         singleLine = true
                     )
+                    if (state.availableWakeWords.isNotEmpty()) {
+                        Spacer(Modifier.height(16.dp))
+                        Text("选择唤醒词（来自 keywords.txt）", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(8.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            state.availableWakeWords.forEach { word ->
+                                FilterChip(
+                                    selected = draftWakeWord == word,
+                                    onClick = { draftWakeWord = word },
+                                    label = { Text(word) }
+                                )
+                            }
+                            FilterChip(
+                                selected = draftWakeWord.isEmpty(),
+                                onClick = { draftWakeWord = "" },
+                                label = { Text("全部") }
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
                 Button(onClick = {
-                    onSaveOtaUrl(draftUrl)
+                    if (draftWakeWord != state.activeWakeWord) {
+                        onSelectWakeWord(draftWakeWord)
+                    }
+                    if (draftUrl.trim() != state.otaUrl) {
+                        onSaveOtaUrl(draftUrl)
+                    }
                     showSettings = false
                 }) {
-                    Text("保存并重连")
+                    Text("保存")
                 }
             },
             dismissButton = {

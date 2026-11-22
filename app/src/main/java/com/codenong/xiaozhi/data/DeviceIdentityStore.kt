@@ -25,6 +25,16 @@ class DeviceIdentityStore(context: Context) {
         prefs.edit().putString(KEY_OTA_URL, normalized).apply()
     }
 
+    fun getSelectedWakeWord(): String? = prefs.getString(KEY_WAKE_WORD, null)
+
+    fun setSelectedWakeWord(wakeWord: String?) {
+        if (wakeWord.isNullOrBlank()) {
+            prefs.edit().remove(KEY_WAKE_WORD).apply()
+        } else {
+            prefs.edit().putString(KEY_WAKE_WORD, wakeWord).apply()
+        }
+    }
+
     private fun generateVirtualMac(): String {
         val random = SecureRandom()
         val bytes = ByteArray(6)
@@ -39,5 +49,6 @@ class DeviceIdentityStore(context: Context) {
         private const val KEY_CLIENT_ID = "client_id"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_OTA_URL = "ota_url"
+        private const val KEY_WAKE_WORD = "selected_wake_word"
     }
 }

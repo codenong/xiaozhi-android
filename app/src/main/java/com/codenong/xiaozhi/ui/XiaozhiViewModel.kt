@@ -34,6 +34,8 @@ data class XiaozhiUiState(
     val deviceId: String = "",
     val autoContinue: Boolean = true,
     val handsFreeWakeEnabled: Boolean = true,
+    val availableWakeWords: List<String> = emptyList(),
+    val activeWakeWord: String = "",
     val errorMessage: String? = null,
     val brightnessPercent: Int? = null
 )
@@ -76,8 +78,21 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         val identity = identityStore.getIdentity()
+        val entries = wakeWordDetector.loadEntriesFromAssets().map { it.displayName }
+        val savedWake = identityStore.getSelectedWakeWord()
+        val effectiveWake = when {
+            savedWake != null && entries.contains(savedWake) -> savedWake
+            savedWake == "" && entries.isNotEmpty() -> ""
+            entries.isNotEmpty() -> entries.first()
+            else -> ""
+        }
         _uiState.update {
-            it.copy(otaUrl = identity.otaUrl, deviceId = identity.deviceId)
+            it.copy(
+                otaUrl = identity.otaUrl,
+                deviceId = identity.deviceId,
+                availableWakeWords = entries,
+                activeWakeWord = effectiveWake
+            )
         }
         bootstrapOta()
     }
@@ -196,6 +211,21 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun selectWakeWord(wakeWord: String) {
+        identityStore.setSelectedWakeWord(wakeWord)
+        audioEngine.updateSelectedWakeWord(wakeWord.ifBlank { null })
+        _uiState.update { state ->
+            state.copy(
+                activeWakeWord = wakeWord,
+                subtitle = if (state.deviceState == DeviceState.IDLE) {
+                    idleHint(state.handsFreeWakeEnabled, wakeWord)
+                } else {
+                    state.subtitle
+                }
+            )
+        }
+    }
+
     fun updateOtaUrl(newUrl: String) {
         identityStore.updateOtaUrl(newUrl)
         val identity = identityStore.getIdentity()
@@ -205,12 +235,19 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
 
     private fun maybeStartWakeWordListening() {
         if (hasMicPermission && _uiState.value.handsFreeWakeEnabled) {
-            audioEngine.startWakeWordDetection()
+            val active = _uiState.value.activeWakeWord.ifBlank { null }
+            audioEngine.startWakeWordDetection(active)
         }
     }
 
-    private fun idleHint(wakeEnabled: Boolean = _uiState.value.handsFreeWakeEnabled): String =
-        if (wakeEnabled) "喊「你好小智」或点击屏幕唤醒" else "点击屏幕开始对话"
+    private fun idleHint(
+        wakeEnabled: Boolean = _uiState.value.handsFreeWakeEnabled,
+        wakeWord: String = _uiState.value.activeWakeWord
+    ): String {
+        if (!wakeEnabled) return "点击屏幕开始对话"
+        val label = wakeWord.ifBlank { _uiState.value.availableWakeWords.joinToString(" / ").ifBlank { "唤醒词" } }
+        return "喊「$label」或点击屏幕唤醒"
+    }
 
     private fun startConversation() {
         val ws = cachedWsConfig
@@ -276,7 +313,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
 
     override fun onTtsStart() {
         if (_uiState.value.handsFreeWakeEnabled && hasMicPermission) {
-            audioEngine.startWakeWordDetection()
+            maybeStartWakeWordListening()
         } else {
             audioEngine.stopCapture()
         }

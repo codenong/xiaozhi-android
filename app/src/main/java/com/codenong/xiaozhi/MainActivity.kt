@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
                 onTapFace = { viewModel.onFaceTapped() },
                 onToggleAutoContinue = { viewModel.toggleAutoContinue() },
                 onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },
+                onSelectWakeWord = { viewModel.selectWakeWord(it) },
                 onSaveOtaUrl = { viewModel.updateOtaUrl(it) }
             )
         }
