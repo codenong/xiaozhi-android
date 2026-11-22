@@ -41,6 +41,18 @@ class DeviceIdentityStore(context: Context) {
         prefs.edit().putString(KEY_UPDATE_URL, url.trim()).apply()
     }
 
+    fun getGuideUrl(): String = prefs.getString(KEY_GUIDE_URL, "") ?: ""
+
+    fun setGuideUrl(url: String) {
+        prefs.edit().putString(KEY_GUIDE_URL, url.trim()).apply()
+    }
+
+    fun hasSeenGuide(): Boolean = prefs.getBoolean(KEY_GUIDE_SEEN, false)
+
+    fun setGuideSeen(seen: Boolean = true) {
+        prefs.edit().putBoolean(KEY_GUIDE_SEEN, seen).apply()
+    }
+
     private fun generateVirtualMac(): String {
         val random = SecureRandom()
         val bytes = ByteArray(6)
@@ -57,5 +69,7 @@ class DeviceIdentityStore(context: Context) {
         private const val KEY_OTA_URL = "ota_url"
         private const val KEY_WAKE_WORD = "selected_wake_word"
         private const val KEY_UPDATE_URL = "update_check_url"
+        private const val KEY_GUIDE_URL = "guide_url"
+        private const val KEY_GUIDE_SEEN = "guide_seen"
     }
 }

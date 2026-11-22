@@ -24,6 +24,8 @@ import kotlinx.coroutines.launch
 data class AppUpdateUiState(
     val currentVersionName: String = "1.0.0",
     val updateUrl: String = "",
+    val guideUrl: String = "",
+    val showGuide: Boolean = false,
     val availableUpdate: RemoteAppVersion? = null,
     val isChecking: Boolean = false,
     val downloadProgress: Int? = null,
@@ -41,7 +43,9 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     private val _updateState = MutableStateFlow(
         AppUpdateUiState(
             currentVersionName = appUpdater.getCurrentVersionName(),
-            updateUrl = identityStore.getUpdateCheckUrl()
+            updateUrl = identityStore.getUpdateCheckUrl(),
+            guideUrl = identityStore.getGuideUrl(),
+            showGuide = !identityStore.hasSeenGuide()
         )
     )
     val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
@@ -103,6 +107,33 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
         _updateState.update { it.copy(updateUrl = url.trim(), statusMessage = null) }
     }
 
+    fun saveGuideUrl(url: String) {
+        identityStore.setGuideUrl(url)
+        _updateState.update { it.copy(guideUrl = url.trim()) }
+    }
+
+    fun resolveGuideUrl(): String {
+        val explicit = _updateState.value.guideUrl.trim()
+        if (explicit.isNotEmpty()) return explicit
+        val update = _updateState.value.updateUrl.trim()
+        if (update.startsWith("http://") || update.startsWith("https://")) {
+            val idx = update.lastIndexOf('/')
+            if (idx > "https://".length) {
+                return update.substring(0, idx + 1) + "guide.html"
+            }
+        }
+        return LOCAL_GUIDE_URL
+    }
+
+    fun openGuide() {
+        _updateState.update { it.copy(showGuide = true) }
+    }
+
+    fun dismissGuide() {
+        identityStore.setGuideSeen(true)
+        _updateState.update { it.copy(showGuide = false) }
+    }
+
     fun checkForUpdate(silent: Boolean = false) {
         val url = _updateState.value.updateUrl
         if (url.isBlank()) {
@@ -162,5 +193,9 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
             runCatching { getApplication<Application>().unbindService(connection) }
             bound = false
         }
+    }
+
+    companion object {
+        const val LOCAL_GUIDE_URL = "file:///android_asset/guide.html"
     }
 }

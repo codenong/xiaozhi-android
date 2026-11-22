@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>小智 AI 使用指南</title>
+  <style>
+    :root {
+      --bg: #0e1117;
+      --card: #161b22;
+      --card-2: #1f2630;
+      --border: #30363d;
+      --text: #f0f6fc;
+      --muted: #8b949e;
+      --blue: #58a6ff;
+      --green: #3fb950;
+      --orange: #f0883e;
+      --red: #ff7b72;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px 16px 36px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .hero {
+      text-align: center;
+      padding: 20px 16px 24px;
+      background: linear-gradient(135deg, #161b22 0%, #1a2332 100%);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      margin-bottom: 16px;
+    }
+    .hero-emoji { font-size: 52px; line-height: 1.1; }
+    .hero h1 {
+      margin: 10px 0 6px;
+      font-size: 24px;
+      font-weight: 700;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 17px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .kw-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .kw-box {
+      background: var(--card-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .kw-tag {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-bottom: 6px;
+    }
+    .tag-wake { background: rgba(63, 185, 80, 0.16); color: var(--green); }
+    .tag-exit { background: rgba(255, 123, 114, 0.16); color: var(--red); }
+    .kw-word {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .kw-desc {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    li { margin-bottom: 8px; }
+    li strong { color: var(--text); }
+    .tip {
+      background: rgba(88, 166, 255, 0.1);
+      border-left: 3px solid var(--blue);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #c9d1d9;
+      margin-top: 10px;
+    }
+    .warn {
+      background: rgba(240, 136, 62, 0.12);
+      border-left: 3px solid var(--orange);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #e6edf3;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <div class="hero-emoji">🤖</div>
+      <h1>欢迎使用小智 AI</h1>
+      <p>专为儿童与锁屏场景打造的语音伙伴，无需解锁平板也能随时聊天</p>
+    </div>
+
+    <div class="card">
+      <h2>🗣️ 语音关键词（最重要）</h2>
+      <div class="kw-grid">
+        <div class="kw-box">
+          <span class="kw-tag tag-wake">唤醒对话</span>
+          <div class="kw-word">「小智小智」</div>
+          <div class="kw-desc">默认唤醒词。在「高级设置」里也可切换为「你好小智」「小智同学」或「全部」。</div>
+        </div>
+        <div class="kw-box">
+          <span class="kw-tag tag-exit">退出 / 保持静默</span>
+          <div class="kw-word">「小智退下」</div>
+          <div class="kw-desc">随时打断并结束当前对话，让小智立刻回到待机静默状态。</div>
+        </div>
+      </div>
+      <div class="tip">
+        小技巧：小智正在说话时，喊<strong>唤醒词</strong>可以打断它并继续提问；喊<strong>「小智退下」</strong>或点击屏幕上的红色<strong>「结束对话」</strong>按钮，则会彻底退出本轮对话。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>👆 屏幕与开关说明</h2>
+      <ul>
+        <li><strong>点击大表情</strong>：待机时点击直接开始对话；正在听你说话时点击可结束；小智说话时点击可打断并继续听。</li>
+        <li><strong>免手触唤醒</strong>：开启后支持熄屏 / 锁屏状态下直接语音唤醒。</li>
+        <li><strong>连续对话</strong>：开启后小智说完会自动继续听下一句，聊天更连贯。</li>
+      </ul>
+      <div class="warn">
+        环境很吵（比如旁边开着电视）时，如果小智容易被杂音触发一直插话，建议暂时关闭底部的<strong>「连续对话」</strong>，或直接对它说<strong>「小智退下」</strong>。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🔋 家长必看：锁屏保活与电量提醒</h2>
+      <ul>
+        <li><strong>开启锁屏保活</strong>：在激活页或「高级设置 → 开启锁屏保活」中关闭电池优化，防止平板锁屏后系统杀掉后台录音服务。</li>
+        <li><strong>低电量语音提示</strong>：即使在熄屏待机状态下，当电量降到 <strong>20%、10%、5%</strong> 时，小智会用较慢的语速离线语音提醒「请充电」。</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

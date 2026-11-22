@@ -82,6 +82,10 @@ class MainActivity : ComponentActivity() {
                 onSelectWakeWord = { viewModel.selectWakeWord(it) },
                 onSaveOtaUrl = { viewModel.updateOtaUrl(it) },
                 onSaveUpdateUrl = { viewModel.saveUpdateUrl(it) },
+                onSaveGuideUrl = { viewModel.saveGuideUrl(it) },
+                resolvedGuideUrl = viewModel.resolveGuideUrl(),
+                onOpenGuide = { viewModel.openGuide() },
+                onDismissGuide = { viewModel.dismissGuide() },
                 onCheckUpdate = { viewModel.checkForUpdate(silent = false) },
                 onDownloadUpdate = { viewModel.downloadAndInstallUpdate() },
                 onDismissUpdate = { viewModel.dismissUpdateDialog() }

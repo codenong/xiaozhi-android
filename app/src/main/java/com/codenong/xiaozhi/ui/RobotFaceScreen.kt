@@ -5,6 +5,11 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +37,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,6 +57,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -71,6 +80,10 @@ fun RobotFaceScreen(
     onSelectWakeWord: (String) -> Unit,
     onSaveOtaUrl: (String) -> Unit,
     onSaveUpdateUrl: (String) -> Unit,
+    onSaveGuideUrl: (String) -> Unit,
+    resolvedGuideUrl: String,
+    onOpenGuide: () -> Unit,
+    onDismissGuide: () -> Unit,
     onCheckUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
     onDismissUpdate: () -> Unit
@@ -315,6 +328,7 @@ fun RobotFaceScreen(
     if (showSettings) {
         var draftOtaUrl by remember(state.otaUrl) { mutableStateOf(state.otaUrl) }
         var draftUpdateUrl by remember(updateState.updateUrl) { mutableStateOf(updateState.updateUrl) }
+        var draftGuideUrl by remember(updateState.guideUrl) { mutableStateOf(updateState.guideUrl) }
         var draftWakeWord by remember(state.activeWakeWord) { mutableStateOf(state.activeWakeWord) }
 
         AlertDialog(
@@ -338,10 +352,18 @@ fun RobotFaceScreen(
                         placeholder = { Text("https://xxx.pages.dev/version.json") },
                         singleLine = true
                     )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = draftGuideUrl,
+                        onValueChange = { draftGuideUrl = it },
+                        label = { Text("使用指南地址 (可选)") },
+                        placeholder = { Text("https://xxx.pages.dev/guide.html") },
+                        singleLine = true
+                    )
                     Spacer(Modifier.height(8.dp))
-                    Row(
+                    FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         OutlinedButton(
                             enabled = !updateState.isChecking,
@@ -354,6 +376,12 @@ fun RobotFaceScreen(
                         }
                         OutlinedButton(onClick = { openBatterySettings() }) {
                             Text(if (isBatteryIgnored) "✓ 锁屏保活" else "开启锁屏保活")
+                        }
+                        OutlinedButton(onClick = {
+                            showSettings = false
+                            onOpenGuide()
+                        }) {
+                            Text("使用指南")
                         }
                     }
                     updateState.statusMessage?.let { msg ->
@@ -416,6 +444,9 @@ fun RobotFaceScreen(
                     if (draftUpdateUrl.trim() != updateState.updateUrl) {
                         onSaveUpdateUrl(draftUpdateUrl)
                     }
+                    if (draftGuideUrl.trim() != updateState.guideUrl) {
+                        onSaveGuideUrl(draftGuideUrl)
+                    }
                     if (draftOtaUrl.trim() != state.otaUrl) {
                         onSaveOtaUrl(draftOtaUrl)
                     }
@@ -474,5 +505,99 @@ fun RobotFaceScreen(
                 }
             }
         )
+    }
+
+    if (updateState.showGuide) {
+        Dialog(
+            onDismissRequest = onDismissGuide,
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFF0E1117)
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "小智使用指南",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        TextButton(onClick = onDismissGuide) {
+                            Text("跳过", color = Color(0xFF8B949E))
+                        }
+                    }
+                    AndroidView(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                setBackgroundColor(android.graphics.Color.parseColor("#0E1117"))
+                                settings.loadWithOverviewMode = true
+                                settings.useWideViewPort = true
+                                webViewClient = object : WebViewClient() {
+                                    override fun onReceivedError(
+                                        view: WebView,
+                                        request: WebResourceRequest,
+                                        error: WebResourceError
+                                    ) {
+                                        if (request.isForMainFrame &&
+                                            request.url.toString() != XiaozhiViewModel.LOCAL_GUIDE_URL
+                                        ) {
+                                            view.loadUrl(XiaozhiViewModel.LOCAL_GUIDE_URL)
+                                        }
+                                    }
+
+                                    override fun onReceivedHttpError(
+                                        view: WebView,
+                                        request: WebResourceRequest,
+                                        errorResponse: WebResourceResponse
+                                    ) {
+                                        if (request.isForMainFrame &&
+                                            errorResponse.statusCode >= 400 &&
+                                            request.url.toString() != XiaozhiViewModel.LOCAL_GUIDE_URL
+                                        ) {
+                                            view.loadUrl(XiaozhiViewModel.LOCAL_GUIDE_URL)
+                                        }
+                                    }
+                                }
+                                loadUrl(resolvedGuideUrl)
+                            }
+                        },
+                        update = { view ->
+                            if (view.url != resolvedGuideUrl &&
+                                view.url != XiaozhiViewModel.LOCAL_GUIDE_URL
+                            ) {
+                                view.loadUrl(resolvedGuideUrl)
+                            }
+                        }
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Button(
+                            onClick = onDismissGuide,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("我知道了，开始使用")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
