@@ -24,3 +24,6 @@ assets/.cache/
 *.jks
 keystore.properties
 
+
+*.jks
+*.keystore

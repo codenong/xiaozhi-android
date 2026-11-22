@@ -1,0 +1,27 @@
+diff a/app/build.gradle.kts b/app/build.gradle.kts	(rejected hunks)
+@@ -16,9 +16,25 @@ android {
+         versionName = "1.0.0"
+     }
+ 
++    signingConfigs {
++        create("release") {
++            val keystorePath = System.getenv("XIAOZHI_KEYSTORE_FILE")
++            if (!keystorePath.isNullOrBlank()) {
++                storeFile = file(keystorePath)
++                storePassword = System.getenv("XIAOZHI_KEYSTORE_PASSWORD")
++                keyAlias = System.getenv("XIAOZHI_KEY_ALIAS")
++                keyPassword = System.getenv("XIAOZHI_KEY_PASSWORD")
++            }
++        }
++    }
++
+     buildTypes {
+         release {
+             isMinifyEnabled = false
++            val keystorePath = System.getenv("XIAOZHI_KEYSTORE_FILE")
++            if (!keystorePath.isNullOrBlank()) {
++                signingConfig = signingConfigs.getByName("release")
++            }
+             proguardFiles(
+                 getDefaultProguardFile("proguard-android-optimize.txt"),
+                 "proguard-rules.pro"

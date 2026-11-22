@@ -1,0 +1,34 @@
+diff a/.github/workflows/android-build.yml b/.github/workflows/android-build.yml	(rejected hunks)
+@@ -41,11 +41,28 @@ jobs:
+         with:
+           gradle-version: '8.7'
+ 
+-      - name: Build Debug APK
++      - name: Decode Release Keystore (if configured)
++        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
++        env:
++          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
++        run: |
++          echo "$KEYSTORE_BASE64" | base64 -d > app/release.jks
++
++      - name: Build Signed Release APK
++        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
++        env:
++          XIAOZHI_KEYSTORE_FILE: release.jks
++          XIAOZHI_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
++          XIAOZHI_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
++          XIAOZHI_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
++        run: gradle assembleRelease --no-daemon
++
++      - name: Build Debug APK (fallback without keystore secret)
++        if: ${{ secrets.KEYSTORE_BASE64 == '' }}
+         run: gradle assembleDebug --no-daemon
+ 
+-      - name: Upload Debug APK
++      - name: Upload APK
+         uses: actions/upload-artifact@v4
+         with:
+-          name: xiaozhi-android-debug-apk
+-          path: app/build/outputs/apk/debug/app-debug.apk
++          name: xiaozhi-android-apk
++          path: app/build/outputs/apk/*/*.apk
