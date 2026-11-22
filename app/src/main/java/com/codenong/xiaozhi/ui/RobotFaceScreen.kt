@@ -365,6 +365,30 @@ fun RobotFaceScreen(
                             )
                         }
                     }
+                    Spacer(Modifier.height(16.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2630)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("关于", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                            Spacer(Modifier.height(4.dp))
+                            Text("当前版本：v${updateState.currentVersionName}", fontSize = 12.sp, color = Color(0xFF8B949E))
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "联系邮箱：codenong@gmail.com",
+                                fontSize = 12.sp,
+                                color = Color(0xFF58A6FF),
+                                modifier = Modifier.clickable {
+                                    clipboard.setText(AnnotatedString("codenong@gmail.com"))
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:codenong@gmail.com")))
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
