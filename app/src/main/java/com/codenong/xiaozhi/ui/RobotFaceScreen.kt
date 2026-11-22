@@ -20,12 +20,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -57,13 +60,18 @@ import com.codenong.xiaozhi.service.XiaozhiUiState
 @Composable
 fun RobotFaceScreen(
     state: XiaozhiUiState,
+    updateState: AppUpdateUiState,
     hasMicPermission: Boolean,
     onRequestMicPermission: () -> Unit,
     onTapFace: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onToggleHandsFreeWake: () -> Unit,
     onSelectWakeWord: (String) -> Unit,
-    onSaveOtaUrl: (String) -> Unit
+    onSaveOtaUrl: (String) -> Unit,
+    onSaveUpdateUrl: (String) -> Unit,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit
 ) {
     var showSettings by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -288,25 +296,52 @@ fun RobotFaceScreen(
     }
 
     if (showSettings) {
-        var draftUrl by remember(state.otaUrl) { mutableStateOf(state.otaUrl) }
+        var draftOtaUrl by remember(state.otaUrl) { mutableStateOf(state.otaUrl) }
+        var draftUpdateUrl by remember(updateState.updateUrl) { mutableStateOf(updateState.updateUrl) }
         var draftWakeWord by remember(state.activeWakeWord) { mutableStateOf(state.activeWakeWord) }
 
         AlertDialog(
             onDismissRequest = { showSettings = false },
-            title = { Text("高级设置") },
+            title = { Text("高级设置 (v${updateState.currentVersionName})") },
             text = {
-                Column {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text("设备 MAC (自动生成): ${state.deviceId}", fontSize = 12.sp, color = Color.Gray)
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
-                        value = draftUrl,
-                        onValueChange = { draftUrl = it },
+                        value = draftOtaUrl,
+                        onValueChange = { draftOtaUrl = it },
                         label = { Text("OTA 服务器地址") },
                         singleLine = true
                     )
                     Spacer(Modifier.height(12.dp))
-                    OutlinedButton(onClick = { openBatterySettings() }) {
-                        Text(if (isBatteryIgnored) "✓ 锁屏保活已开启" else "锁屏保活：去关闭电池优化")
+                    OutlinedTextField(
+                        value = draftUpdateUrl,
+                        onValueChange = { draftUpdateUrl = it },
+                        label = { Text("更新地址 (version.json)") },
+                        placeholder = { Text("https://xxx.pages.dev/version.json") },
+                        singleLine = true
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            enabled = !updateState.isChecking,
+                            onClick = {
+                                onSaveUpdateUrl(draftUpdateUrl)
+                                onCheckUpdate()
+                            }
+                        ) {
+                            Text(if (updateState.isChecking) "检查中..." else "检查更新")
+                        }
+                        OutlinedButton(onClick = { openBatterySettings() }) {
+                            Text(if (isBatteryIgnored) "✓ 锁屏保活" else "开启锁屏保活")
+                        }
+                    }
+                    updateState.statusMessage?.let { msg ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(msg, fontSize = 12.sp, color = Color(0xFF58A6FF))
                     }
                     if (state.availableWakeWords.isNotEmpty()) {
                         Spacer(Modifier.height(16.dp))
@@ -337,8 +372,11 @@ fun RobotFaceScreen(
                     if (draftWakeWord != state.activeWakeWord) {
                         onSelectWakeWord(draftWakeWord)
                     }
-                    if (draftUrl.trim() != state.otaUrl) {
-                        onSaveOtaUrl(draftUrl)
+                    if (draftUpdateUrl.trim() != updateState.updateUrl) {
+                        onSaveUpdateUrl(draftUpdateUrl)
+                    }
+                    if (draftOtaUrl.trim() != state.otaUrl) {
+                        onSaveOtaUrl(draftOtaUrl)
                     }
                     showSettings = false
                 }) {
@@ -348,6 +386,50 @@ fun RobotFaceScreen(
             dismissButton = {
                 TextButton(onClick = { showSettings = false }) {
                     Text("取消")
+                }
+            }
+        )
+    }
+
+    updateState.availableUpdate?.let { remote ->
+        AlertDialog(
+            onDismissRequest = {
+                if (updateState.downloadProgress == null) onDismissUpdate()
+            },
+            title = { Text("发现新版本 v${remote.versionName}") },
+            text = {
+                Column {
+                    if (remote.changelog.isNotBlank()) {
+                        Text(remote.changelog, fontSize = 14.sp)
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    updateState.downloadProgress?.let { progress ->
+                        LinearProgressIndicator(
+                            progress = { progress / 100f },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text("正在下载更新：$progress%", fontSize = 12.sp, color = Color.Gray)
+                    }
+                    updateState.statusMessage?.let { msg ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(msg, fontSize = 12.sp, color = Color(0xFFFF7B72))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = updateState.downloadProgress == null,
+                    onClick = onDownloadUpdate
+                ) {
+                    Text(if (updateState.downloadProgress != null) "下载中..." else "立即更新")
+                }
+            },
+            dismissButton = {
+                if (updateState.downloadProgress == null) {
+                    TextButton(onClick = onDismissUpdate) {
+                        Text("稍后")
+                    }
                 }
             }
         )

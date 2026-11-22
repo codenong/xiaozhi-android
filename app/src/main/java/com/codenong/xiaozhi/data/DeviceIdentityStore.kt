@@ -35,6 +35,12 @@ class DeviceIdentityStore(context: Context) {
         }
     }
 
+    fun getUpdateCheckUrl(): String = prefs.getString(KEY_UPDATE_URL, "") ?: ""
+
+    fun setUpdateCheckUrl(url: String) {
+        prefs.edit().putString(KEY_UPDATE_URL, url.trim()).apply()
+    }
+
     private fun generateVirtualMac(): String {
         val random = SecureRandom()
         val bytes = ByteArray(6)
@@ -50,5 +56,6 @@ class DeviceIdentityStore(context: Context) {
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_OTA_URL = "ota_url"
         private const val KEY_WAKE_WORD = "selected_wake_word"
+        private const val KEY_UPDATE_URL = "update_check_url"
     }
 }

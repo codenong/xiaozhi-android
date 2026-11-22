@@ -9,23 +9,53 @@ import android.os.IBinder
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.codenong.xiaozhi.data.DeviceIdentityStore
 import com.codenong.xiaozhi.service.XiaozhiService
 import com.codenong.xiaozhi.service.XiaozhiUiState
+import com.codenong.xiaozhi.update.AppUpdater
+import com.codenong.xiaozhi.update.RemoteAppVersion
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+data class AppUpdateUiState(
+    val currentVersionName: String = "1.0.0",
+    val updateUrl: String = "",
+    val availableUpdate: RemoteAppVersion? = null,
+    val isChecking: Boolean = false,
+    val downloadProgress: Int? = null,
+    val statusMessage: String? = null
+)
 
 class XiaozhiViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val identityStore = DeviceIdentityStore(application)
+    private val appUpdater = AppUpdater(application)
+
     private val _uiState = MutableStateFlow(XiaozhiUiState())
     val uiState: StateFlow<XiaozhiUiState> = _uiState.asStateFlow()
+
+    private val _updateState = MutableStateFlow(
+        AppUpdateUiState(
+            currentVersionName = appUpdater.getCurrentVersionName(),
+            updateUrl = identityStore.getUpdateCheckUrl()
+        )
+    )
+    val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
 
     private var service: XiaozhiService? = null
     private var collectJob: Job? = null
     private var pendingMicPermission: Boolean? = null
     private var bound = false
+
+    init {
+        if (_updateState.value.updateUrl.isNotBlank()) {
+            checkForUpdate(silent = true)
+        }
+    }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -66,6 +96,63 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     fun toggleHandsFreeWake() = service?.toggleHandsFreeWake()
     fun selectWakeWord(wakeWord: String) = service?.selectWakeWord(wakeWord)
     fun updateOtaUrl(newUrl: String) = service?.updateOtaUrl(newUrl)
+
+    fun saveUpdateUrl(url: String) {
+        identityStore.setUpdateCheckUrl(url)
+        _updateState.update { it.copy(updateUrl = url.trim(), statusMessage = null) }
+    }
+
+    fun checkForUpdate(silent: Boolean = false) {
+        val url = _updateState.value.updateUrl
+        if (url.isBlank()) {
+            if (!silent) {
+                _updateState.update { it.copy(statusMessage = "请先填写 version.json 地址") }
+            }
+            return
+        }
+        viewModelScope.launch {
+            _updateState.update { it.copy(isChecking = true, statusMessage = null) }
+            appUpdater.checkForUpdate(url)
+                .onSuccess { remote ->
+                    _updateState.update {
+                        it.copy(
+                            isChecking = false,
+                            availableUpdate = remote,
+                            statusMessage = if (remote == null && !silent) "当前已是最新版本" else null
+                        )
+                    }
+                }
+                .onFailure { err ->
+                    _updateState.update {
+                        it.copy(
+                            isChecking = false,
+                            statusMessage = if (silent) null else "检查更新失败: ${err.message}"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun downloadAndInstallUpdate() {
+        val update = _updateState.value.availableUpdate ?: return
+        viewModelScope.launch {
+            _updateState.update { it.copy(downloadProgress = 0, statusMessage = null) }
+            appUpdater.downloadApk(update.apkUrl) { progress ->
+                _updateState.update { it.copy(downloadProgress = progress) }
+            }.onSuccess { file ->
+                _updateState.update { it.copy(downloadProgress = null, availableUpdate = null) }
+                appUpdater.installApk(file)
+            }.onFailure { err ->
+                _updateState.update {
+                    it.copy(downloadProgress = null, statusMessage = err.message ?: "下载失败")
+                }
+            }
+        }
+    }
+
+    fun dismissUpdateDialog() {
+        _updateState.update { it.copy(availableUpdate = null, downloadProgress = null) }
+    }
 
     override fun onCleared() {
         super.onCleared()

@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val state by viewModel.uiState.collectAsState()
+            val updateState by viewModel.updateState.collectAsState()
             var hasMicPermission by remember {
                 mutableStateOf(
                     ContextCompat.checkSelfPermission(
@@ -71,13 +72,18 @@ class MainActivity : ComponentActivity() {
 
             RobotFaceScreen(
                 state = state,
+                updateState = updateState,
                 hasMicPermission = hasMicPermission,
                 onRequestMicPermission = { launcher.launch(permissionsToRequest) },
                 onTapFace = { viewModel.onFaceTapped() },
                 onToggleAutoContinue = { viewModel.toggleAutoContinue() },
                 onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },
                 onSelectWakeWord = { viewModel.selectWakeWord(it) },
-                onSaveOtaUrl = { viewModel.updateOtaUrl(it) }
+                onSaveOtaUrl = { viewModel.updateOtaUrl(it) },
+                onSaveUpdateUrl = { viewModel.saveUpdateUrl(it) },
+                onCheckUpdate = { viewModel.checkForUpdate(silent = false) },
+                onDownloadUpdate = { viewModel.downloadAndInstallUpdate() },
+                onDismissUpdate = { viewModel.dismissUpdateDialog() }
             )
         }
     }
