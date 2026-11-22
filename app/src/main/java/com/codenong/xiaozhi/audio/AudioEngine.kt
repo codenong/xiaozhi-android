@@ -1,11 +1,15 @@
 package com.codenong.xiaozhi.audio
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Build
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.NoiseSuppressor
@@ -24,6 +28,7 @@ enum class CaptureMode {
 }
 
 class AudioEngine(
+    context: Context,
     private val scope: CoroutineScope,
     private val opusCodec: OpusCodec,
     private val wakeWordDetector: WakeWordDetector,
@@ -32,6 +37,7 @@ class AudioEngine(
     private val onExitWordDetected: (String) -> Unit,
     private val onVoiceActivity: (Boolean) -> Unit
 ) {
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioRecord: AudioRecord? = null
     private var aec: AcousticEchoCanceler? = null
     private var ns: NoiseSuppressor? = null
@@ -175,10 +181,11 @@ class AudioEngine(
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
+        enableSpeakerphone()
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -228,8 +235,41 @@ class AudioEngine(
         }
     }
 
+    fun enableSpeakerphone() {
+        runCatching {
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val speaker = audioManager.availableCommunicationDevices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                }
+                if (speaker != null) {
+                    audioManager.setCommunicationDevice(speaker)
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager.isSpeakerphoneOn = true
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.isSpeakerphoneOn = true
+            }
+        }
+    }
+
+    fun restoreAudioMode() {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                audioManager.clearCommunicationDevice()
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.isSpeakerphoneOn = false
+            }
+            audioManager.mode = AudioManager.MODE_NORMAL
+        }
+    }
+
     fun release() {
         stopCapture()
+        restoreAudioMode()
         wakeWordDetector.release()
         playJob?.cancel()
         playQueue.clear()

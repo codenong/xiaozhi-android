@@ -84,6 +84,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private var isNetworkAvailable: Boolean = true
     @Volatile
     private var isUserDisconnecting: Boolean = false
+    @Volatile
+    private var ignoreNextTtsStop: Boolean = false
 
     private val _uiState = MutableStateFlow(XiaozhiUiState())
     val uiState: StateFlow<XiaozhiUiState> = _uiState.asStateFlow()
@@ -102,6 +104,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
         wsClient = XiaozhiWebSocketClient(this)
         audioEngine = AudioEngine(
+            context = applicationContext,
             scope = serviceScope,
             opusCodec = opusCodec,
             wakeWordDetector = wakeWordDetector,
@@ -236,6 +239,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             pendingWakeKeyword = keyword
             startConversation()
         } else if (state == DeviceState.SPEAKING) {
+            ignoreNextTtsStop = true
             wsClient.sendAbort("wake_word_detected")
             audioEngine.clearPlayback()
             startListeningInternal()
@@ -263,6 +267,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             }
             DeviceState.LISTENING -> stopConversation()
             DeviceState.SPEAKING -> {
+                ignoreNextTtsStop = true
                 wsClient.sendAbort("user_interrupt")
                 audioEngine.clearPlayback()
                 startListeningInternal()
@@ -353,6 +358,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             return
         }
         isUserDisconnecting = false
+        ignoreNextTtsStop = false
         audioEngine.exitWordEnabled = false
         acquireLocks()
         _uiState.update {
@@ -385,10 +391,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     private fun stopConversation() {
         isUserDisconnecting = true
+        ignoreNextTtsStop = false
         audioEngine.exitWordEnabled = false
         wsClient.sendAbort("user_exit")
         wsClient.sendStopListening()
         audioEngine.clearPlayback()
+        audioEngine.restoreAudioMode()
         wsClient.disconnect()
         _uiState.update {
             it.copy(
@@ -431,6 +439,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onTtsStart() {
+        ignoreNextTtsStop = false
         _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
         audioEngine.exitWordEnabled = true
         if (_uiState.value.handsFreeWakeEnabled && hasMicPermission) {
@@ -442,6 +451,10 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onTtsStop() {
+        if (ignoreNextTtsStop) {
+            ignoreNextTtsStop = false
+            return
+        }
         if (_uiState.value.autoContinue) {
             startListeningInternal()
         } else {
@@ -476,6 +489,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     override fun onClosed(reason: String, isError: Boolean) {
         audioEngine.exitWordEnabled = false
+        ignoreNextTtsStop = false
+        audioEngine.restoreAudioMode()
         val userEnded = isUserDisconnecting
         isUserDisconnecting = false
         val showDisconnectError = !userEnded && (isError || !isNetworkAvailable)
