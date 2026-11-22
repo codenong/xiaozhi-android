@@ -502,6 +502,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        batteryAlertMonitor.stop()
         activationJob?.cancel()
         wsClient.disconnect()
         audioEngine.release()
