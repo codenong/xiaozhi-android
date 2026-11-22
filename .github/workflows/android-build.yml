@@ -42,25 +42,20 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Decode Release Keystore (if configured)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      - name: Build APK
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > app/release.jks
-
-      - name: Build Signed Release APK
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
-        env:
-          XIAOZHI_KEYSTORE_FILE: release.jks
           XIAOZHI_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           XIAOZHI_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           XIAOZHI_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle assembleRelease --no-daemon
-
-      - name: Build Debug APK (fallback without keystore secret)
-        if: ${{ secrets.KEYSTORE_BASE64 == '' }}
-        run: gradle assembleDebug --no-daemon
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > app/release.jks
+            export XIAOZHI_KEYSTORE_FILE="release.jks"
+            gradle assembleRelease --no-daemon
+          else
+            gradle assembleDebug --no-daemon
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
