@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.codenong.xiaozhi.audio.AudioEngine
 import com.codenong.xiaozhi.audio.OpusCodec
+import com.codenong.xiaozhi.audio.WakeWordDetector
 import com.codenong.xiaozhi.data.DeviceIdentityStore
 import com.codenong.xiaozhi.mcp.McpServer
 import com.codenong.xiaozhi.model.ActivationInfo
@@ -32,6 +33,7 @@ data class XiaozhiUiState(
     val otaUrl: String = DeviceIdentityStore.DEFAULT_OTA_URL,
     val deviceId: String = "",
     val autoContinue: Boolean = true,
+    val handsFreeWakeEnabled: Boolean = true,
     val errorMessage: String? = null,
     val brightnessPercent: Int? = null
 )
@@ -41,6 +43,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     private val identityStore = DeviceIdentityStore(application)
     private val otaClient = OtaClient()
     private val opusCodec = OpusCodec()
+    private val wakeWordDetector = WakeWordDetector(application)
     private val mcpServer = McpServer(application) { brightness ->
         _uiState.update { it.copy(brightnessPercent = brightness) }
     }
@@ -49,9 +52,15 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     private val audioEngine = AudioEngine(
         scope = viewModelScope,
         opusCodec = opusCodec,
+        wakeWordDetector = wakeWordDetector,
         onEncodedFrame = { opus ->
             if (_uiState.value.deviceState == DeviceState.LISTENING) {
                 wsClient.sendAudioFrame(opus)
+            }
+        },
+        onWakeWordDetected = { keyword ->
+            viewModelScope.launch {
+                handleWakeWordTriggered(keyword)
             }
         },
         onVoiceActivity = { /* 可用于本地打断优化 */ }
@@ -62,6 +71,8 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
 
     private var cachedWsConfig: WebSocketConfig? = null
     private var activationJob: Job? = null
+    private var hasMicPermission: Boolean = false
+    private var pendingWakeKeyword: String? = null
 
     init {
         val identity = identityStore.getIdentity()
@@ -69,6 +80,13 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
             it.copy(otaUrl = identity.otaUrl, deviceId = identity.deviceId)
         }
         bootstrapOta()
+    }
+
+    fun onMicPermissionChanged(granted: Boolean) {
+        hasMicPermission = granted
+        if (granted && _uiState.value.deviceState == DeviceState.IDLE) {
+            maybeStartWakeWordListening()
+        }
     }
 
     fun bootstrapOta() {
@@ -99,9 +117,10 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
                             it.copy(
                                 deviceState = DeviceState.IDLE,
                                 activation = null,
-                                subtitle = "已就绪，点击屏幕开始对话"
+                                subtitle = idleHint()
                             )
                         }
+                        maybeStartWakeWordListening()
                     }
                 }
                 .onFailure { err ->
@@ -131,9 +150,24 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun handleWakeWordTriggered(keyword: String) {
+        val state = _uiState.value.deviceState
+        if (state == DeviceState.IDLE) {
+            pendingWakeKeyword = keyword
+            startConversation()
+        } else if (state == DeviceState.SPEAKING) {
+            wsClient.sendAbort("wake_word_detected")
+            audioEngine.clearPlayback()
+            startListeningInternal()
+        }
+    }
+
     fun onFaceTapped() {
         when (_uiState.value.deviceState) {
-            DeviceState.IDLE -> startConversation()
+            DeviceState.IDLE -> {
+                pendingWakeKeyword = null
+                startConversation()
+            }
             DeviceState.LISTENING -> stopConversation()
             DeviceState.SPEAKING -> {
                 wsClient.sendAbort("user_interrupt")
@@ -149,12 +183,34 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(autoContinue = !it.autoContinue) }
     }
 
+    fun toggleHandsFreeWake() {
+        val next = !_uiState.value.handsFreeWakeEnabled
+        _uiState.update {
+            it.copy(
+                handsFreeWakeEnabled = next,
+                subtitle = if (_uiState.value.deviceState == DeviceState.IDLE) idleHint(next) else it.subtitle
+            )
+        }
+        if (_uiState.value.deviceState == DeviceState.IDLE) {
+            if (next) maybeStartWakeWordListening() else audioEngine.stopCapture()
+        }
+    }
+
     fun updateOtaUrl(newUrl: String) {
         identityStore.updateOtaUrl(newUrl)
         val identity = identityStore.getIdentity()
         _uiState.update { it.copy(otaUrl = identity.otaUrl) }
         bootstrapOta()
     }
+
+    private fun maybeStartWakeWordListening() {
+        if (hasMicPermission && _uiState.value.handsFreeWakeEnabled) {
+            audioEngine.startWakeWordDetection()
+        }
+    }
+
+    private fun idleHint(wakeEnabled: Boolean = _uiState.value.handsFreeWakeEnabled): String =
+        if (wakeEnabled) "喊「你好小智」或点击屏幕唤醒" else "点击屏幕开始对话"
 
     private fun startConversation() {
         val ws = cachedWsConfig
@@ -179,11 +235,10 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
         }
         val mode = if (_uiState.value.autoContinue) "auto" else "manual"
         wsClient.sendStartListening(mode)
-        audioEngine.startCapture()
+        audioEngine.startConversationCapture()
     }
 
     private fun stopConversation() {
-        audioEngine.stopCapture()
         wsClient.sendStopListening()
         wsClient.disconnect()
         _uiState.update {
@@ -191,13 +246,18 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
                 deviceState = DeviceState.IDLE,
                 emotion = "neutral",
                 emoji = "🤖",
-                subtitle = "点击屏幕开始对话"
+                subtitle = idleHint()
             )
         }
+        maybeStartWakeWordListening()
     }
 
     override fun onServerHello(sessionId: String, outputSampleRate: Int) {
         audioEngine.ensurePlaybackStarted(outputSampleRate)
+        pendingWakeKeyword?.let { kw ->
+            wsClient.sendWakeWordDetected(kw)
+            pendingWakeKeyword = null
+        }
         startListeningInternal()
     }
 
@@ -215,7 +275,11 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     }
 
     override fun onTtsStart() {
-        audioEngine.stopCapture()
+        if (_uiState.value.handsFreeWakeEnabled && hasMicPermission) {
+            audioEngine.startWakeWordDetection()
+        } else {
+            audioEngine.stopCapture()
+        }
         _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
     }
 
@@ -224,8 +288,9 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
             startListeningInternal()
         } else {
             _uiState.update {
-                it.copy(deviceState = DeviceState.IDLE, emoji = "🤖", subtitle = "点击屏幕继续对话")
+                it.copy(deviceState = DeviceState.IDLE, emoji = "🤖", subtitle = idleHint())
             }
+            maybeStartWakeWordListening()
         }
     }
 
@@ -252,14 +317,14 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     }
 
     override fun onClosed(reason: String) {
-        audioEngine.stopCapture()
         _uiState.update {
             it.copy(
                 deviceState = DeviceState.IDLE,
                 emoji = "🤖",
-                subtitle = "连接已断开，点击屏幕重新唤醒"
+                subtitle = idleHint()
             )
         }
+        maybeStartWakeWordListening()
     }
 
     override fun onCleared() {

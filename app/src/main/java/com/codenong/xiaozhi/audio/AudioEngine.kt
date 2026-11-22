@@ -16,10 +16,18 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.math.abs
 
+enum class CaptureMode {
+    OFF,
+    WAKE_WORD,
+    CONVERSATION
+}
+
 class AudioEngine(
     private val scope: CoroutineScope,
     private val opusCodec: OpusCodec,
+    private val wakeWordDetector: WakeWordDetector,
     private val onEncodedFrame: (ByteArray) -> Unit,
+    private val onWakeWordDetected: (String) -> Unit,
     private val onVoiceActivity: (Boolean) -> Unit
 ) {
     private var audioRecord: AudioRecord? = null
@@ -33,12 +41,39 @@ class AudioEngine(
     private val playQueue = LinkedBlockingQueue<ByteArray>(80)
 
     @Volatile
-    var isCapturing: Boolean = false
+    var captureMode: CaptureMode = CaptureMode.OFF
         private set
 
+    fun startWakeWordDetection() {
+        if (!wakeWordDetector.initialize()) return
+        wakeWordDetector.reset()
+        captureMode = CaptureMode.WAKE_WORD
+        ensureCaptureLoopRunning()
+    }
+
+    fun startConversationCapture() {
+        captureMode = CaptureMode.CONVERSATION
+        ensureCaptureLoopRunning()
+    }
+
+    fun stopCapture() {
+        captureMode = CaptureMode.OFF
+        recordJob?.cancel()
+        recordJob = null
+        runCatching {
+            audioRecord?.stop()
+            audioRecord?.release()
+            aec?.release()
+            ns?.release()
+        }
+        audioRecord = null
+        aec = null
+        ns = null
+    }
+
     @SuppressLint("MissingPermission")
-    fun startCapture() {
-        if (isCapturing) return
+    private fun ensureCaptureLoopRunning() {
+        if (audioRecord != null && recordJob?.isActive == true) return
         val sampleRate = 16000
         val frameSamples = opusCodec.inputFrameSamples
         val minBuf = AudioRecord.getMinBufferSize(
@@ -53,6 +88,10 @@ class AudioEngine(
             AudioFormat.ENCODING_PCM_16BIT,
             maxOf(minBuf, frameSamples * 4)
         )
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            return
+        }
         if (AcousticEchoCanceler.isAvailable()) {
             aec = AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
         }
@@ -61,45 +100,42 @@ class AudioEngine(
         }
 
         audioRecord = record
-        isCapturing = true
         record.startRecording()
 
         recordJob = scope.launch(Dispatchers.IO) {
             val pcmBuffer = ShortArray(frameSamples)
             var lastVad = false
-            while (isActive && isCapturing) {
+            while (isActive && captureMode != CaptureMode.OFF) {
                 var read = 0
-                while (read < frameSamples && isCapturing) {
+                while (read < frameSamples && captureMode != CaptureMode.OFF) {
                     val n = record.read(pcmBuffer, read, frameSamples - read)
                     if (n > 0) read += n else break
                 }
-                if (read == frameSamples) {
-                    val avgAmp = pcmBuffer.fold(0L) { acc, s -> acc + abs(s.toInt()) } / frameSamples
-                    val vad = avgAmp > 350
-                    if (vad != lastVad) {
-                        lastVad = vad
-                        onVoiceActivity(vad)
+                if (read != frameSamples) continue
+
+                when (captureMode) {
+                    CaptureMode.WAKE_WORD -> {
+                        val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
+                        if (keyword != null) {
+                            onWakeWordDetected(keyword)
+                        }
                     }
-                    val opus = opusCodec.encode(pcmBuffer)
-                    onEncodedFrame(opus)
+
+                    CaptureMode.CONVERSATION -> {
+                        val avgAmp = pcmBuffer.fold(0L) { acc, s -> acc + abs(s.toInt()) } / frameSamples
+                        val vad = avgAmp > 350
+                        if (vad != lastVad) {
+                            lastVad = vad
+                            onVoiceActivity(vad)
+                        }
+                        val opus = opusCodec.encode(pcmBuffer)
+                        onEncodedFrame(opus)
+                    }
+
+                    CaptureMode.OFF -> break
                 }
             }
         }
-    }
-
-    fun stopCapture() {
-        isCapturing = false
-        recordJob?.cancel()
-        recordJob = null
-        runCatching {
-            audioRecord?.stop()
-            audioRecord?.release()
-            aec?.release()
-            ns?.release()
-        }
-        audioRecord = null
-        aec = null
-        ns = null
     }
 
     fun ensurePlaybackStarted(sampleRate: Int) {
@@ -159,6 +195,7 @@ class AudioEngine(
 
     fun release() {
         stopCapture()
+        wakeWordDetector.release()
         playJob?.cancel()
         playQueue.clear()
         runCatching {

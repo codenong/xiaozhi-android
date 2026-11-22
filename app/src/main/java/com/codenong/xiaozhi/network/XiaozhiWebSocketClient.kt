@@ -98,6 +98,16 @@ class XiaozhiWebSocketClient(
         webSocket?.send(hello.toString())
     }
 
+    fun sendWakeWordDetected(keyword: String) {
+        val msg = JSONObject().apply {
+            put("session_id", sessionId)
+            put("type", "listen")
+            put("state", "detect")
+            put("text", keyword)
+        }
+        webSocket?.send(msg.toString())
+    }
+
     fun sendStartListening(mode: String = "auto") {
         val msg = JSONObject().apply {
             put("session_id", sessionId)

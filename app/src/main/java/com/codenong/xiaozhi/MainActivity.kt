@@ -42,9 +42,11 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.RequestPermission()
             ) { granted ->
                 hasMicPermission = granted
+                viewModel.onMicPermissionChanged(granted)
             }
 
-            LaunchedEffect(Unit) {
+            LaunchedEffect(hasMicPermission) {
+                viewModel.onMicPermissionChanged(hasMicPermission)
                 if (!hasMicPermission) {
                     launcher.launch(Manifest.permission.RECORD_AUDIO)
                 }
@@ -63,6 +65,7 @@ class MainActivity : ComponentActivity() {
                 onRequestMicPermission = { launcher.launch(Manifest.permission.RECORD_AUDIO) },
                 onTapFace = { viewModel.onFaceTapped() },
                 onToggleAutoContinue = { viewModel.toggleAutoContinue() },
+                onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },
                 onSaveOtaUrl = { viewModel.updateOtaUrl(it) }
             )
         }

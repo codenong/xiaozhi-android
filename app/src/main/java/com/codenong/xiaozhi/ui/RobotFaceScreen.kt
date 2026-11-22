@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -48,6 +49,7 @@ fun RobotFaceScreen(
     onRequestMicPermission: () -> Unit,
     onTapFace: () -> Unit,
     onToggleAutoContinue: () -> Unit,
+    onToggleHandsFreeWake: () -> Unit,
     onSaveOtaUrl: (String) -> Unit
 ) {
     var showSettings by remember { mutableStateOf(false) }
@@ -93,7 +95,7 @@ fun RobotFaceScreen(
                         Text("需要麦克风权限", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            "为了和小智进行实时语音对话，请先授予录音权限。",
+                            "为了和小智进行实时语音对话及离线语音唤醒，请先授予录音权限。",
                             color = Color(0xFF8B949E),
                             textAlign = TextAlign.Center
                         )
@@ -185,6 +187,7 @@ fun RobotFaceScreen(
             }
         }
 
+        // 底部对话与唤醒模式控制
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -192,12 +195,18 @@ fun RobotFaceScreen(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("连续对话模式", color = Color(0xFF8B949E), fontSize = 14.sp)
-            Spacer(Modifier.height(8.dp))
+            Text("免手触唤醒", color = Color(0xFF8B949E), fontSize = 14.sp)
+            Switch(
+                checked = state.handsFreeWakeEnabled,
+                onCheckedChange = { onToggleHandsFreeWake() },
+                modifier = Modifier.padding(start = 8.dp)
+            )
+            Spacer(Modifier.width(24.dp))
+            Text("连续对话", color = Color(0xFF8B949E), fontSize = 14.sp)
             Switch(
                 checked = state.autoContinue,
                 onCheckedChange = { onToggleAutoContinue() },
-                modifier = Modifier.padding(start = 10.dp)
+                modifier = Modifier.padding(start = 8.dp)
             )
         }
     }
