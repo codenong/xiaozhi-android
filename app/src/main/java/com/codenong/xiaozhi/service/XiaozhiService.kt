@@ -72,6 +72,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private lateinit var wsClient: XiaozhiWebSocketClient
     private lateinit var audioEngine: AudioEngine
 
+    private lateinit var batteryAlertMonitor: BatteryAlertMonitor
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
@@ -108,6 +109,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             onVoiceActivity = { /* 可用于本地打断优化 */ }
         )
 
+        batteryAlertMonitor = BatteryAlertMonitor(applicationContext)
+        batteryAlertMonitor.start()
         createNotificationChannel()
         startForegroundCompat("小智正在后台待机聆听")
 
