@@ -15,6 +15,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
+      - name: Download Sherpa-ONNX AAR and KWS model
+        run: |
+          mkdir -p app/libs app/src/main/assets/kws
+          curl -fL "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-2.0.2.aar" \
+            -o app/libs/sherpa-onnx-2.0.2.aar
+
+          curl -fL "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2" \
+            -o /tmp/kws-model.tar.bz2
+          tar -xf /tmp/kws-model.tar.bz2 -C /tmp
+          MODEL_DIR="/tmp/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20"
+          cp "$(ls $MODEL_DIR/encoder-*.int8.onnx | head -n 1)" app/src/main/assets/kws/encoder.onnx
+          cp "$(ls $MODEL_DIR/decoder-*.onnx | head -n 1)" app/src/main/assets/kws/decoder.onnx
+          cp "$(ls $MODEL_DIR/joiner-*.int8.onnx | head -n 1)" app/src/main/assets/kws/joiner.onnx
+          cp "$MODEL_DIR/tokens.txt" app/src/main/assets/kws/tokens.txt
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
