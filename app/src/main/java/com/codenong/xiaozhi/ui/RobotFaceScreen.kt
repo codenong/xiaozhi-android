@@ -63,6 +63,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.codenong.xiaozhi.BuildConfig
 import com.codenong.xiaozhi.model.DeviceState
 import com.codenong.xiaozhi.service.XiaozhiUiState
 
@@ -419,7 +420,9 @@ fun RobotFaceScreen(
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text("关于", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                             Spacer(Modifier.height(4.dp))
-                            Text("当前版本：v${updateState.currentVersionName}", fontSize = 12.sp, color = Color(0xFF8B949E))
+                            Text("当前版本：v${updateState.currentVersionName} (${BuildConfig.VERSION_CODE})", fontSize = 12.sp, color = Color(0xFF8B949E))
+                            Spacer(Modifier.height(2.dp))
+                            Text("Git 提交：${BuildConfig.GIT_COMMIT}", fontSize = 12.sp, color = Color(0xFF8B949E))
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = "联系邮箱：codenong@gmail.com",

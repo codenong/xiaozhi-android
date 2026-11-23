@@ -4,6 +4,22 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+fun runGit(vararg args: String): String? = runCatching {
+    val process = ProcessBuilder("git", *args)
+        .directory(rootProject.projectDir)
+        .redirectErrorStream(true)
+        .start()
+    val output = process.inputStream.bufferedReader().readText().trim()
+    if (process.waitFor() == 0 && output.isNotBlank()) output else null
+}.getOrNull()
+
+val gitCommitHash = runGit("rev-parse", "--short", "HEAD")
+    ?: System.getenv("GITHUB_SHA")?.take(7)
+    ?: "unknown"
+val gitCommitCount = runGit("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 1
+val autoVersionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: gitCommitCount).coerceAtLeast(1)
+val autoVersionName = "1.15.$autoVersionCode"
+
 android {
     namespace = "com.codenong.xiaozhi"
     compileSdk = 35
@@ -12,8 +28,10 @@ android {
         applicationId = "com.codenong.xiaozhi"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.15.0"
+        versionCode = autoVersionCode
+        versionName = autoVersionName
+
+        buildConfigField("String", "GIT_COMMIT", "\"$gitCommitHash\"")
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -64,6 +82,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         jniLibs {
