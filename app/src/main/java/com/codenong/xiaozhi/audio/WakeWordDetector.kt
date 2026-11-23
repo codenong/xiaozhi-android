@@ -22,6 +22,7 @@ class WakeWordDetector(
     private var stream: OnlineStream? = null
     private var exitStream: OnlineStream? = null
     private var activeWakeWordName: String? = null
+    private var floatBuffer: FloatArray = FloatArray(0)
 
     @Volatile
     var isInitialized: Boolean = false
@@ -64,7 +65,7 @@ class WakeWordDetector(
             val modelConfig = OnlineModelConfig(
                 transducer = transducer,
                 tokens = "kws/tokens.txt",
-                numThreads = 2,
+                numThreads = 1,
                 debug = false,
                 modelType = "zipformer2"
             )
@@ -130,8 +131,13 @@ class WakeWordDetector(
         pcm: ShortArray,
         length: Int
     ): String? {
-        val floats = FloatArray(length) { pcm[it] / 32768.0f }
-        targetStream.acceptWaveform(samples = floats, sampleRate = sampleRate)
+        if (floatBuffer.size != length) {
+            floatBuffer = FloatArray(length)
+        }
+        for (i in 0 until length) {
+            floatBuffer[i] = pcm[i] / 32768.0f
+        }
+        targetStream.acceptWaveform(samples = floatBuffer, sampleRate = sampleRate)
         while (kws.isReady(targetStream)) {
             kws.decode(targetStream)
             val result = kws.getResult(targetStream)

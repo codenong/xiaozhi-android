@@ -59,9 +59,14 @@ class AudioEngine(
     @Volatile
     private var exitWordCooldownUntilMs: Long = 0L
 
+    private var kwsActiveUntilMs: Long = 0L
+    private val kwsPreRoll = ArrayDeque<ShortArray>(4)
+
     fun startWakeWordDetection(selectedWakeWord: String? = null) {
         if (!wakeWordDetector.initialize(selectedWakeWord)) return
         wakeWordDetector.reset()
+        kwsActiveUntilMs = 0L
+        kwsPreRoll.clear()
         captureMode = CaptureMode.WAKE_WORD
         ensureCaptureLoopRunning()
     }
@@ -137,13 +142,44 @@ class AudioEngine(
 
                 when (captureMode) {
                     CaptureMode.WAKE_WORD -> {
-                        val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
-                        if (keyword != null) {
-                            onWakeWordDetected(keyword)
-                        } else if (exitWordEnabled) {
-                            val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
-                            if (exitKeyword != null) {
-                                onExitWordDetected(exitKeyword)
+                        if (exitWordEnabled) {
+                            val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
+                            if (keyword != null) {
+                                onWakeWordDetected(keyword)
+                            } else {
+                                val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
+                                if (exitKeyword != null) {
+                                    onExitWordDetected(exitKeyword)
+                                }
+                            }
+                        } else {
+                            val now = System.currentTimeMillis()
+                            val avgAmp = averageAmplitude(pcmBuffer, read)
+                            if (avgAmp > WAKE_ENERGY_THRESHOLD) {
+                                if (now >= kwsActiveUntilMs && kwsPreRoll.isNotEmpty()) {
+                                    for (pre in kwsPreRoll) {
+                                        val preKw = wakeWordDetector.processPcm16(pre, pre.size)
+                                        if (preKw != null) {
+                                            onWakeWordDetected(preKw)
+                                        }
+                                    }
+                                    kwsPreRoll.clear()
+                                }
+                                kwsActiveUntilMs = now + WAKE_HANGOVER_MS
+                            }
+
+                            if (now < kwsActiveUntilMs) {
+                                val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
+                                if (keyword != null) {
+                                    kwsActiveUntilMs = 0L
+                                    kwsPreRoll.clear()
+                                    onWakeWordDetected(keyword)
+                                }
+                            } else {
+                                if (kwsPreRoll.size >= PRE_ROLL_FRAMES) {
+                                    kwsPreRoll.removeFirst()
+                                }
+                                kwsPreRoll.addLast(pcmBuffer.copyOf(read))
                             }
                         }
                     }
@@ -174,7 +210,15 @@ class AudioEngine(
 
     fun ensurePlaybackStarted(sampleRate: Int) {
         opusCodec.updateOutputSampleRate(sampleRate)
-        if (audioTrack != null && playJob?.isActive == true) return
+        if (audioTrack != null && playJob?.isActive == true) {
+            enableSpeakerphone()
+            runCatching {
+                if (audioTrack?.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                    audioTrack?.play()
+                }
+            }
+            return
+        }
 
         val minBuf = AudioTrack.getMinBufferSize(
             sampleRate,
@@ -214,6 +258,9 @@ class AudioEngine(
             while (isActive) {
                 val packet = playQueue.take()
                 val pcm = runCatching { opusCodec.decode(packet) }.getOrNull() ?: continue
+                if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                    runCatching { track.play() }
+                }
                 track.write(pcm, 0, pcm.size)
             }
         }
@@ -226,13 +273,27 @@ class AudioEngine(
         }
     }
 
-    fun clearPlayback() {
+    fun clearPlayback(resumePlay: Boolean = true) {
         playQueue.clear()
         runCatching {
             audioTrack?.pause()
             audioTrack?.flush()
-            audioTrack?.play()
+            if (resumePlay) {
+                audioTrack?.play()
+            }
         }
+    }
+
+    fun pausePlayback() {
+        clearPlayback(resumePlay = false)
+    }
+
+    private fun averageAmplitude(pcm: ShortArray, length: Int): Long {
+        var sum = 0L
+        for (i in 0 until length) {
+            sum += abs(pcm[i].toInt())
+        }
+        return if (length > 0) sum / length else 0L
     }
 
     fun enableSpeakerphone() {
@@ -280,5 +341,11 @@ class AudioEngine(
         }
         loudnessEnhancer = null
         audioTrack = null
+    }
+
+    companion object {
+        private const val WAKE_ENERGY_THRESHOLD = 180L
+        private const val WAKE_HANGOVER_MS = 2000L
+        private const val PRE_ROLL_FRAMES = 3
     }
 }

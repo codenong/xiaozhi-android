@@ -294,7 +294,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 maybeStartWakeWordListening()
             } else {
                 audioEngine.stopCapture()
-                releaseLocks()
+                releaseAllLocks()
             }
         }
     }
@@ -323,7 +323,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     private fun maybeStartWakeWordListening() {
         if (hasMicPermission && _uiState.value.handsFreeWakeEnabled) {
-            acquireLocks()
+            acquireWakeLock()
             val active = _uiState.value.activeWakeWord.ifBlank { null }
             audioEngine.exitWordEnabled = _uiState.value.deviceState == DeviceState.SPEAKING
             audioEngine.startWakeWordDetection(active)
@@ -360,7 +360,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         isUserDisconnecting = false
         ignoreNextTtsStop = false
         audioEngine.exitWordEnabled = false
-        acquireLocks()
+        acquireWakeLock()
+        acquireWifiLock()
         _uiState.update {
             it.copy(
                 deviceState = DeviceState.CONNECTING,
@@ -395,8 +396,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         audioEngine.exitWordEnabled = false
         wsClient.sendAbort("user_exit")
         wsClient.sendStopListening()
-        audioEngine.clearPlayback()
+        audioEngine.pausePlayback()
         audioEngine.restoreAudioMode()
+        releaseWifiLock()
         wsClient.disconnect()
         _uiState.update {
             it.copy(
@@ -411,7 +413,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             maybeStartWakeWordListening()
         } else {
             audioEngine.stopCapture()
-            releaseLocks()
+            releaseAllLocks()
             updateNotification("小智已待机")
         }
     }
@@ -490,7 +492,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     override fun onClosed(reason: String, isError: Boolean) {
         audioEngine.exitWordEnabled = false
         ignoreNextTtsStop = false
+        audioEngine.pausePlayback()
         audioEngine.restoreAudioMode()
+        releaseWifiLock()
         val userEnded = isUserDisconnecting
         isUserDisconnecting = false
         val showDisconnectError = !userEnded && (isError || !isNetworkAvailable)
@@ -514,7 +518,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             }
         } else {
             audioEngine.stopCapture()
-            releaseLocks()
+            releaseAllLocks()
             updateNotification(if (showDisconnectError) "网络已断开" else "小智已待机")
         }
     }
@@ -565,7 +569,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         runCatching { cm.registerDefaultNetworkCallback(cb) }
     }
 
-    private fun acquireLocks() {
+    private fun acquireWakeLock() {
         if (wakeLock?.isHeld != true) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "xiaozhi:WakeWordLock").apply {
@@ -573,6 +577,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 acquire()
             }
         }
+    }
+
+    private fun acquireWifiLock() {
         if (wifiLock?.isHeld != true) {
             val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -588,7 +595,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
     }
 
-    private fun releaseLocks() {
+    private fun releaseWifiLock() {
+        runCatching {
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        }
+    }
+
+    private fun releaseAllLocks() {
         runCatching {
             if (wakeLock?.isHeld == true) wakeLock?.release()
             if (wifiLock?.isHeld == true) wifiLock?.release()
@@ -647,7 +660,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         activationJob?.cancel()
         wsClient.disconnect()
         audioEngine.release()
-        releaseLocks()
+        releaseAllLocks()
         serviceScope.cancel()
     }
 
