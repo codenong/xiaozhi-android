@@ -18,10 +18,12 @@ class WakeWordDetector(
     private val context: Context,
     private val sampleRate: Int = 16000
 ) {
+    private val pinyinConverter = PinyinConverter(context)
     private var spotter: KeywordSpotter? = null
     private var stream: OnlineStream? = null
     private var exitStream: OnlineStream? = null
     private var activeWakeWordName: String? = null
+    private var activeExitWordName: String = DEFAULT_EXIT_KEYWORD
     private var floatBuffer: FloatArray = FloatArray(0)
 
     @Volatile
@@ -52,8 +54,12 @@ class WakeWordDetector(
         }.getOrDefault(emptyList())
     }
 
-    fun initialize(selectedWakeWord: String? = activeWakeWordName): Boolean {
+    fun initialize(
+        selectedWakeWord: String? = activeWakeWordName,
+        exitWord: String = activeExitWordName
+    ): Boolean {
         activeWakeWordName = selectedWakeWord
+        activeExitWordName = exitWord.ifBlank { DEFAULT_EXIT_KEYWORD }
         if (isInitialized) return true
 
         return runCatching {
@@ -77,7 +83,7 @@ class WakeWordDetector(
             val kws = KeywordSpotter(assetManager = context.assets, config = config)
             spotter = kws
             stream = createStreamForSelection(kws, selectedWakeWord)
-            exitStream = createExitStream(kws)
+            exitStream = createExitStream(kws, activeExitWordName)
             isInitialized = true
             true
         }.onFailure { err ->
@@ -94,20 +100,76 @@ class WakeWordDetector(
         oldStream?.release()
     }
 
+    @Synchronized
+    fun updateCustomKeywords(wakeWord: String?, exitWord: String?): Result<Unit> {
+        val cleanWake = wakeWord?.trim().orEmpty()
+        val cleanExit = exitWord?.trim().orEmpty().ifEmpty { DEFAULT_EXIT_KEYWORD }
+
+        val wakeLine = if (cleanWake.isNotEmpty()) {
+            val preset = loadWakeWordEntries().firstOrNull { it.displayName == cleanWake }
+            preset?.rawLine ?: pinyinConverter.toKeywordLine(cleanWake, 1.5f, 0.25f).getOrElse {
+                return Result.failure(it)
+            }
+        } else {
+            null
+        }
+
+        val exitPreset = loadEntriesFromAssets().firstOrNull { it.displayName == cleanExit }
+        val exitLine = exitPreset?.rawLine ?: pinyinConverter.toKeywordLine(cleanExit, 1.0f, 0.45f).getOrElse {
+            return Result.failure(it)
+        }
+
+        activeWakeWordName = cleanWake.ifEmpty { null }
+        activeExitWordName = cleanExit
+
+        val kws = spotter ?: return Result.success(Unit)
+        val newWakeStream = if (wakeLine != null) {
+            kws.createStream(wakeLine).also {
+                if (it.ptr == 0L) return Result.failure(IllegalStateException("唤醒词模型加载失败"))
+            }
+        } else {
+            kws.createStream()
+        }
+        val newExitStream = kws.createStream(exitLine).also {
+            if (it.ptr == 0L) {
+                newWakeStream.release()
+                return Result.failure(IllegalStateException("结束词模型加载失败"))
+            }
+        }
+
+        val oldWake = stream
+        val oldExit = exitStream
+        stream = newWakeStream
+        exitStream = newExitStream
+        oldWake?.release()
+        oldExit?.release()
+        return Result.success(Unit)
+    }
+
     private fun createStreamForSelection(kws: KeywordSpotter, displayName: String?): OnlineStream {
         if (!displayName.isNullOrBlank()) {
             val entry = loadWakeWordEntries().firstOrNull { it.displayName == displayName }
             if (entry != null) {
                 val custom = kws.createStream(entry.rawLine)
                 if (custom.ptr != 0L) return custom
+            } else {
+                val converted = pinyinConverter.toKeywordLine(displayName, 1.5f, 0.25f).getOrNull()
+                if (converted != null) {
+                    val custom = kws.createStream(converted)
+                    if (custom.ptr != 0L) return custom
+                }
             }
         }
         return kws.createStream()
     }
 
-    private fun createExitStream(kws: KeywordSpotter): OnlineStream? {
-        val entry = loadEntriesFromAssets().firstOrNull { isExitKeyword(it.displayName) } ?: return null
-        val custom = kws.createStream(entry.rawLine)
+    private fun createExitStream(kws: KeywordSpotter, exitWord: String): OnlineStream? {
+        val target = exitWord.ifBlank { DEFAULT_EXIT_KEYWORD }
+        val entry = loadEntriesFromAssets().firstOrNull { it.displayName == target }
+        val line = entry?.rawLine
+            ?: pinyinConverter.toKeywordLine(target, 1.0f, 0.45f).getOrNull()
+            ?: return null
+        val custom = kws.createStream(line)
         return if (custom.ptr != 0L) custom else null
     }
 
@@ -169,10 +231,12 @@ class WakeWordDetector(
         spotter = null
     }
 
+    fun isCurrentExitKeyword(keyword: String): Boolean = keyword.trim() == activeExitWordName
+
     companion object {
         private const val TAG = "WakeWordDetector"
-        const val EXIT_KEYWORD = "小智退下"
+        const val DEFAULT_EXIT_KEYWORD = "小智退下"
 
-        fun isExitKeyword(keyword: String): Boolean = keyword.trim() == EXIT_KEYWORD
+        fun isExitKeyword(keyword: String): Boolean = keyword.trim() == DEFAULT_EXIT_KEYWORD
     }
 }

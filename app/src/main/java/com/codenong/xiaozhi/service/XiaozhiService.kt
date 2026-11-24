@@ -64,6 +64,7 @@ data class XiaozhiUiState(
     val powerSaveEnabled: Boolean = false,
     val availableWakeWords: List<String> = emptyList(),
     val activeWakeWord: String = "",
+    val activeExitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD,
     val errorMessage: String? = null,
     val brightnessPercent: Int? = null,
     val musicTitle: String? = null,
@@ -272,8 +273,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         val identity = identityStore.getIdentity()
         val entries = wakeWordDetector.loadWakeWordEntries().map { it.displayName }
         val savedWake = identityStore.getSelectedWakeWord()
+        val savedExit = identityStore.getCustomExitWord()
         val effectiveWake = when {
-            savedWake != null && entries.contains(savedWake) -> savedWake
+            !savedWake.isNullOrBlank() -> savedWake
             savedWake == "" && entries.isNotEmpty() -> ""
             entries.isNotEmpty() -> entries.first()
             else -> ""
@@ -284,7 +286,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 deviceId = identity.deviceId,
                 powerSaveEnabled = savedPowerSave,
                 availableWakeWords = entries,
-                activeWakeWord = effectiveWake
+                activeWakeWord = effectiveWake,
+                activeExitWord = savedExit
             )
         }
         bootstrapOta()
@@ -373,7 +376,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun handleWakeWordTriggered(keyword: String) {
-        if (WakeWordDetector.isExitKeyword(keyword)) {
+        if (wakeWordDetector.isCurrentExitKeyword(keyword)) {
             val state = _uiState.value.deviceState
             if (state == DeviceState.LISTENING || state == DeviceState.SPEAKING) {
                 handleExitWordTriggered()
@@ -669,6 +672,31 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
     }
 
+    fun updatePromptKeywords(wakeWord: String, exitWord: String): Result<Unit> {
+        val cleanWake = wakeWord.trim()
+        val cleanExit = exitWord.trim().ifEmpty { WakeWordDetector.DEFAULT_EXIT_KEYWORD }
+        val result = audioEngine.updateCustomKeywords(cleanWake.ifBlank { null }, cleanExit)
+        if (result.isSuccess) {
+            identityStore.setSelectedWakeWord(cleanWake)
+            identityStore.setCustomExitWord(cleanExit)
+            _uiState.update { state ->
+                state.copy(
+                    activeWakeWord = cleanWake,
+                    activeExitWord = cleanExit,
+                    subtitle = if (state.deviceState == DeviceState.IDLE) {
+                        idleHint(state.handsFreeWakeEnabled, cleanWake)
+                    } else {
+                        state.subtitle
+                    }
+                )
+            }
+            if (_uiState.value.deviceState == DeviceState.IDLE && _uiState.value.handsFreeWakeEnabled) {
+                updateNotification("锁屏待机中 · 喊「${cleanWake.ifBlank { "唤醒词" }}」开始对话")
+            }
+        }
+        return result
+    }
+
     fun updateOtaUrl(newUrl: String) {
         identityStore.updateOtaUrl(newUrl)
         val identity = identityStore.getIdentity()
@@ -683,8 +711,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 acquireWifiLock()
             }
             val active = _uiState.value.activeWakeWord.ifBlank { null }
+            val exitWord = _uiState.value.activeExitWord
             audioEngine.exitWordEnabled = _uiState.value.deviceState == DeviceState.SPEAKING
-            audioEngine.startWakeWordDetection(active)
+            audioEngine.startWakeWordDetection(active, exitWord)
             updateNotification("锁屏待机中 · 喊「${active ?: "唤醒词"}」开始对话")
         }
     }
@@ -741,14 +770,17 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 deviceState = DeviceState.LISTENING,
                 emotion = "listening",
                 emoji = "👂",
-                subtitle = "我在听，请说话...（说「${WakeWordDetector.EXIT_KEYWORD}」结束）",
+                subtitle = "我在听，请说话...（说「${_uiState.value.activeExitWord}」结束）",
                 errorMessage = null
             )
         }
         updateNotification("正在聆听说话...")
         val mode = if (_uiState.value.autoContinue) "auto" else "manual"
         wsClient.sendStartListening(mode)
-        audioEngine.startConversationCapture(_uiState.value.activeWakeWord.ifBlank { null })
+        audioEngine.startConversationCapture(
+            _uiState.value.activeWakeWord.ifBlank { null },
+            _uiState.value.activeExitWord
+        )
     }
 
     private fun stopConversation() {

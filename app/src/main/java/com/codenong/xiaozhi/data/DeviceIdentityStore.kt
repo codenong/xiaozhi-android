@@ -35,6 +35,17 @@ class DeviceIdentityStore(context: Context) {
         }
     }
 
+    fun getCustomExitWord(): String = prefs.getString(KEY_CUSTOM_EXIT_WORD, DEFAULT_EXIT_WORD) ?: DEFAULT_EXIT_WORD
+
+    fun setCustomExitWord(exitWord: String?) {
+        val clean = exitWord?.trim().orEmpty()
+        if (clean.isEmpty()) {
+            prefs.edit().remove(KEY_CUSTOM_EXIT_WORD).apply()
+        } else {
+            prefs.edit().putString(KEY_CUSTOM_EXIT_WORD, clean).apply()
+        }
+    }
+
     fun getUpdateCheckUrl(): String = prefs.getString(KEY_UPDATE_URL, "") ?: ""
 
     fun setUpdateCheckUrl(url: String) {
@@ -78,5 +89,7 @@ class DeviceIdentityStore(context: Context) {
         private const val KEY_GUIDE_URL = "guide_url"
         private const val KEY_GUIDE_SEEN = "guide_seen"
         private const val KEY_POWER_SAVE_ENABLED = "power_save_enabled"
+        private const val KEY_CUSTOM_EXIT_WORD = "custom_exit_word"
+        const val DEFAULT_EXIT_WORD = "小智退下"
     }
 }

@@ -90,6 +90,7 @@ fun RobotFaceScreen(
     onToggleHandsFreeWake: () -> Unit,
     onTogglePowerSaveMode: () -> Unit,
     onSelectWakeWord: (String) -> Unit,
+    onUpdatePromptKeywords: (String, String) -> Result<Unit>,
     onSaveOtaUrl: (String) -> Unit,
     onSaveUpdateUrl: (String) -> Unit,
     onSaveGuideUrl: (String) -> Unit,
@@ -101,6 +102,7 @@ fun RobotFaceScreen(
     onDismissUpdate: () -> Unit
 ) {
     var showSettings by remember { mutableStateOf(false) }
+    var showPromptEditor by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -476,6 +478,12 @@ fun RobotFaceScreen(
                         }) {
                             Text("使用指南")
                         }
+                        OutlinedButton(onClick = {
+                            showSettings = false
+                            showPromptEditor = true
+                        }) {
+                            Text("提示词修改")
+                        }
                     }
                     updateState.statusMessage?.let { msg ->
                         Spacer(Modifier.height(6.dp))
@@ -596,6 +604,77 @@ fun RobotFaceScreen(
                 if (updateState.downloadProgress == null) {
                     TextButton(onClick = onDismissUpdate) {
                         Text("稍后")
+                    }
+                }
+            }
+        )
+    }
+
+    if (showPromptEditor) {
+        var customWakeInput by remember(state.activeWakeWord) { mutableStateOf(state.activeWakeWord) }
+        var customExitInput by remember(state.activeExitWord) { mutableStateOf(state.activeExitWord) }
+        var promptError by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showPromptEditor = false },
+            title = { Text("修改提示词") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = "支持输入常用汉字自定义唤醒词与结束词，保存后立即生效。",
+                        fontSize = 12.sp,
+                        color = Color(0xFF8B949E)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = customWakeInput,
+                        onValueChange = {
+                            customWakeInput = it
+                            promptError = null
+                        },
+                        label = { Text("唤醒词（留空则监听全部预设）") },
+                        placeholder = { Text("例如：小智小智") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = customExitInput,
+                        onValueChange = {
+                            customExitInput = it
+                            promptError = null
+                        },
+                        label = { Text("结束词") },
+                        placeholder = { Text("默认：小智退下") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    promptError?.let { err ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(err, fontSize = 12.sp, color = Color(0xFFFF7B72))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onUpdatePromptKeywords(customWakeInput, customExitInput)
+                        .onSuccess { showPromptEditor = false }
+                        .onFailure { err -> promptError = err.message ?: "保存失败" }
+                }) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        customWakeInput = state.availableWakeWords.firstOrNull() ?: "小智小智"
+                        customExitInput = "小智退下"
+                        promptError = null
+                    }) {
+                        Text("恢复默认")
+                    }
+                    TextButton(onClick = { showPromptEditor = false }) {
+                        Text("取消")
                     }
                 }
             }

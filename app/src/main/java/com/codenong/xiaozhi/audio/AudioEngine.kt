@@ -65,8 +65,8 @@ class AudioEngine(
     private var kwsActiveUntilMs: Long = 0L
     private val kwsPreRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES + 1)
 
-    fun startWakeWordDetection(selectedWakeWord: String? = null) {
-        if (!wakeWordDetector.initialize(selectedWakeWord)) return
+    fun startWakeWordDetection(selectedWakeWord: String? = null, exitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD) {
+        if (!wakeWordDetector.initialize(selectedWakeWord, exitWord)) return
         wakeWordDetector.reset()
         kwsActiveUntilMs = 0L
         kwsPreRoll.clear()
@@ -78,8 +78,12 @@ class AudioEngine(
         wakeWordDetector.setActiveWakeWord(selectedWakeWord)
     }
 
-    fun startConversationCapture(selectedWakeWord: String? = null) {
-        wakeWordDetector.initialize(selectedWakeWord)
+    fun updateCustomKeywords(wakeWord: String?, exitWord: String?): Result<Unit> {
+        return wakeWordDetector.updateCustomKeywords(wakeWord, exitWord)
+    }
+
+    fun startConversationCapture(selectedWakeWord: String? = null, exitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD) {
+        wakeWordDetector.initialize(selectedWakeWord, exitWord)
         wakeWordDetector.reset()
         exitWordCooldownUntilMs = System.currentTimeMillis() + 800L
         captureMode = CaptureMode.CONVERSATION

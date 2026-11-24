@@ -92,6 +92,7 @@ class MainActivity : ComponentActivity() {
                 onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },
                 onTogglePowerSaveMode = { viewModel.togglePowerSaveMode() },
                 onSelectWakeWord = { viewModel.selectWakeWord(it) },
+                onUpdatePromptKeywords = { wake, exit -> viewModel.updatePromptKeywords(wake, exit) },
                 onSaveOtaUrl = { viewModel.updateOtaUrl(it) },
                 onSaveUpdateUrl = { viewModel.saveUpdateUrl(it) },
                 onSaveGuideUrl = { viewModel.saveGuideUrl(it) },
