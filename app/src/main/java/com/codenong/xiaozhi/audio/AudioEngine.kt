@@ -60,7 +60,7 @@ class AudioEngine(
     private var exitWordCooldownUntilMs: Long = 0L
 
     private var kwsActiveUntilMs: Long = 0L
-    private val kwsPreRoll = ArrayDeque<ShortArray>(4)
+    private val kwsPreRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES + 1)
 
     fun startWakeWordDetection(selectedWakeWord: String? = null) {
         if (!wakeWordDetector.initialize(selectedWakeWord)) return
@@ -344,8 +344,8 @@ class AudioEngine(
     }
 
     companion object {
-        private const val WAKE_ENERGY_THRESHOLD = 180L
-        private const val WAKE_HANGOVER_MS = 2000L
-        private const val PRE_ROLL_FRAMES = 3
+        private const val WAKE_ENERGY_THRESHOLD = 45L
+        private const val WAKE_HANGOVER_MS = 3000L
+        private const val PRE_ROLL_FRAMES = 6
     }
 }
