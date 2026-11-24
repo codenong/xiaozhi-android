@@ -3,6 +3,7 @@ package com.codenong.xiaozhi.audio
 import android.content.Context
 import android.icu.text.Transliterator
 import android.os.Build
+import android.util.Log
 
 class PinyinConverter(private val context: Context) {
 
@@ -51,7 +52,9 @@ class PinyinConverter(private val context: Context) {
         if (tokens.isEmpty()) {
             return Result.failure(IllegalArgumentException("无法识别「$clean」的拼音"))
         }
-        return Result.success("${tokens.joinToString(" ")} :$score #$threshold @$clean")
+        val line = "${tokens.joinToString(" ")} :$score #$threshold @$clean"
+        Log.i("XiaozhiKWS", "PinyinConverter '$clean' -> '$line'")
+        return Result.success(line)
     }
 
     private fun resolveValidToken(token: String): String? {

@@ -10,6 +10,7 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.os.Build
+import android.util.Log
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.NoiseSuppressor
@@ -66,7 +67,9 @@ class AudioEngine(
     private val kwsPreRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES + 1)
 
     fun startWakeWordDetection(selectedWakeWord: String? = null, exitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD) {
-        if (!wakeWordDetector.initialize(selectedWakeWord, exitWord)) return
+        val ok = wakeWordDetector.initialize(selectedWakeWord, exitWord)
+        Log.i("XiaozhiKWS", "startWakeWordDetection(wake=$selectedWakeWord, exit=$exitWord, powerSave=$powerSaveEnabled) initOk=$ok")
+        if (!ok) return
         wakeWordDetector.reset()
         kwsActiveUntilMs = 0L
         kwsPreRoll.clear()

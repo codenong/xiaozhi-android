@@ -80,10 +80,14 @@ class WakeWordDetector(
 
             val wakeContent = buildWakeFileContent(selectedWakeWord)
             val exitContent = buildExitFileContent(activeExitWordName)
+            Log.i(TAG, "initialize() wake='$selectedWakeWord' -> ${wakeContent.trim()}")
+            Log.i(TAG, "initialize() exit='$activeExitWordName' -> ${exitContent.trim()}")
             activeWakeLinePreview = wakeContent.trim()
             wakeFile.writeText(wakeContent, Charsets.UTF_8)
             exitFile.writeText(exitContent, Charsets.UTF_8)
 
+            Log.i(TAG, "updateCustomKeywords() wake='$cleanWake' -> ${wakeContent.trim()}")
+            Log.i(TAG, "updateCustomKeywords() exit='$cleanExit' -> ${exitContent.trim()}")
             val newWakeSpotter = buildSpotter(kwsDir, wakeFile)
             val newWakeStream = newWakeSpotter.createStream()
             val newExitSpotter = buildSpotter(kwsDir, exitFile)
@@ -279,6 +283,7 @@ class WakeWordDetector(
             kws.decode(targetStream)
             val result = kws.getResult(targetStream)
             if (result.keyword.isNotBlank()) {
+                Log.i(TAG, "Detected keyword: '${result.keyword}'")
                 kws.reset(targetStream)
                 return result.keyword
             }
@@ -310,7 +315,7 @@ class WakeWordDetector(
     fun isCurrentExitKeyword(keyword: String): Boolean = keyword.trim() == activeExitWordName
 
     companion object {
-        private const val TAG = "WakeWordDetector"
+        private const val TAG = "XiaozhiKWS"
         const val DEFAULT_EXIT_KEYWORD = "小智退下"
 
         fun isExitKeyword(keyword: String): Boolean = keyword.trim() == DEFAULT_EXIT_KEYWORD
