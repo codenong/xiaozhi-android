@@ -190,7 +190,7 @@ class McpServer(
             ))
             put(toolSchema(
                 name = "self.reminder.get_fired_alert",
-                description = "Get the reminder message that just fired when '闹钟响了' is received, then speak it aloud clearly to remind the user.",
+                description = "REQUIRED whenever '请查闹钟提醒' or '闹钟响了' is received: fetch the exact reminder content and read that specific content aloud to the user.",
                 properties = JSONObject()
             ))
             put(toolSchema(

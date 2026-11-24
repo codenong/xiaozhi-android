@@ -213,11 +213,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 override fun onGetCurrentTime(): String = reminderManager.getCurrentTimeJson()
 
                 override fun onGetFiredReminder(): String {
-                    val msg = lastFiredReminderMessage
-                    return if (msg.isNullOrBlank()) {
-                        "当前没有刚触发的闹钟提醒"
+                    val msg = lastFiredReminderMessage?.trim().orEmpty()
+                    val isGeneric = msg.isEmpty() || msg in setOf("提醒", "闹钟", "定时提醒", "时间到了")
+                    return if (isGeneric) {
+                        "没有具体提醒内容，请直接用语音说：提醒时间到了。"
                     } else {
-                        "刚刚触发的提醒内容是：$msg。请直接用简短清晰的语气语音提醒用户：时间到了，请记得$msg。"
+                        "必须用语音直接播报以下具体提醒内容（不要只说时间到了）：时间到了，提醒你$msg。"
                     }
                 }
 
@@ -525,7 +526,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             return
         }
 
-        val prompt = "闹钟响了"
+        val prompt = "请查闹钟提醒"
         isReminderActive = true
         pendingReminderPrompt = prompt
 
