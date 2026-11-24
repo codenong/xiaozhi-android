@@ -15,11 +15,9 @@ import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import android.media.AudioAttributes
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.PowerManager
-import android.speech.tts.TextToSpeech
 import com.codenong.xiaozhi.MainActivity
 import com.codenong.xiaozhi.audio.AudioEngine
 import com.codenong.xiaozhi.audio.MusicPlayer
@@ -33,7 +31,6 @@ import com.codenong.xiaozhi.phone.CallPrepareResult
 import com.codenong.xiaozhi.mcp.ReminderControlListener
 import com.codenong.xiaozhi.phone.PhoneCallManager
 import com.codenong.xiaozhi.reminder.ReminderManager
-import java.util.Locale
 import com.codenong.xiaozhi.model.ActivationInfo
 import com.codenong.xiaozhi.model.DeviceState
 import com.codenong.xiaozhi.model.WebSocketConfig
@@ -94,11 +91,14 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private lateinit var musicPlayer: MusicPlayer
     private lateinit var phoneCallManager: PhoneCallManager
     private lateinit var reminderManager: ReminderManager
-    private var reminderTts: TextToSpeech? = null
-    private var reminderTtsReady: Boolean = false
-    private var reminderTtsFailed: Boolean = false
-    private var pendingReminderSpeech: String? = null
     private var fallbackRingtone: Ringtone? = null
+    private var reminderTimeoutJob: Job? = null
+    @Volatile
+    private var pendingReminderPrompt: String? = null
+    @Volatile
+    private var isReminderActive: Boolean = false
+    @Volatile
+    private var resumeMusicAfterReminder: Boolean = false
     private var deferredMusicJob: Job? = null
     private var deferredCallJob: Job? = null
 
@@ -270,7 +270,6 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
         batteryAlertMonitor = BatteryAlertMonitor(applicationContext)
         batteryAlertMonitor.start()
-        initReminderTts()
         registerNetworkMonitor()
         createNotificationChannel()
         startForegroundCompat("小智正在后台待机聆听")
@@ -408,12 +407,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun playMusicFromMcp(url: String, title: String?) {
-        runCatching {
-            reminderTts?.stop()
-            reminderTts?.shutdown()
-        }
-        reminderTts = null
-        reminderTtsReady = false
+        reminderTimeoutJob?.cancel()
+        pendingReminderPrompt = null
+        isReminderActive = false
+        resumeMusicAfterReminder = false
+        runCatching { fallbackRingtone?.stop() }
+        fallbackRingtone = null
         deferredMusicJob?.cancel()
         val shouldDefer = _uiState.value.deviceState != DeviceState.IDLE
         musicPlayer.play(url, title, deferStart = shouldDefer)
@@ -466,48 +465,19 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     fun dismissReminder() {
-        pendingReminderSpeech = null
-        runCatching { reminderTts?.stop() }
+        reminderTimeoutJob?.cancel()
+        pendingReminderPrompt = null
+        val wasReminder = isReminderActive
+        isReminderActive = false
         runCatching { fallbackRingtone?.stop() }
         fallbackRingtone = null
         _uiState.update { it.copy(activeReminderMessage = null) }
-    }
-
-    private fun initReminderTts() {
-        if (reminderTts != null) return
-        reminderTts = TextToSpeech(applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                val engine = reminderTts ?: return@TextToSpeech
-                val res = engine.setLanguage(Locale.SIMPLIFIED_CHINESE)
-                if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    val zhRes = engine.setLanguage(Locale.CHINESE)
-                    if (zhRes == TextToSpeech.LANG_MISSING_DATA || zhRes == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        reminderTtsFailed = true
-                    }
-                }
-                engine.setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-                engine.setSpeechRate(0.85f)
-                reminderTtsReady = !reminderTtsFailed
-                pendingReminderSpeech?.let { pending ->
-                    pendingReminderSpeech = null
-                    if (reminderTtsReady) {
-                        engine.speak(pending, TextToSpeech.QUEUE_FLUSH, null, "xiaozhi_reminder")
-                    } else {
-                        playFallbackReminderTone()
-                    }
-                }
-            } else {
-                reminderTtsFailed = true
-                if (pendingReminderSpeech != null) {
-                    pendingReminderSpeech = null
-                    playFallbackReminderTone()
-                }
-            }
+        if (wasReminder && _uiState.value.deviceState != DeviceState.IDLE) {
+            stopConversation()
+        }
+        if (resumeMusicAfterReminder) {
+            resumeMusicAfterReminder = false
+            musicPlayer.resume()
         }
     }
 
@@ -516,31 +486,61 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             reminderManager.markTriggered(reminderId)
         }
         if (musicPlayer.isActive()) {
+            resumeMusicAfterReminder = true
             musicPlayer.pause()
         }
         _uiState.update { it.copy(activeReminderMessage = message) }
         updateNotification("⏰ 提醒：$message")
-        speakReminderText("时间到了，提醒你：$message。时间到了，提醒你：$message")
+
+        val wsCfg = cachedWsConfig
+        if (!isNetworkAvailable || wsCfg == null || wsCfg.url.isBlank()) {
+            isReminderActive = true
+            playFallbackReminderTone()
+            reminderTimeoutJob?.cancel()
+            reminderTimeoutJob = serviceScope.launch {
+                delay(4000L)
+                runCatching { fallbackRingtone?.stop() }
+                fallbackRingtone = null
+                finishReminderAndResumeMusic()
+            }
+            return
+        }
+
+        val prompt = "现在是定时提醒时间，请直接用简短清晰的语气语音提醒用户（不要反问）：时间到了，请记得$message"
+        isReminderActive = true
+        pendingReminderPrompt = prompt
+
+        reminderTimeoutJob?.cancel()
+        reminderTimeoutJob = serviceScope.launch {
+            delay(18000L)
+            if (isReminderActive) {
+                finishReminderAndResumeMusic()
+            }
+        }
+
+        if (_uiState.value.deviceState == DeviceState.IDLE) {
+            pendingWakeKeyword = null
+            startConversation()
+        } else {
+            ignoreNextTtsStop = false
+            wsClient.sendAbort("reminder_alert")
+            audioEngine.clearPlayback()
+            wsClient.sendWakeWordDetected(prompt)
+            pendingReminderPrompt = null
+        }
     }
 
-    private fun speakReminderText(text: String) {
-        if (reminderTtsFailed) {
-            playFallbackReminderTone()
-            return
+    private fun finishReminderAndResumeMusic() {
+        reminderTimeoutJob?.cancel()
+        pendingReminderPrompt = null
+        if (!isReminderActive) return
+        isReminderActive = false
+        if (_uiState.value.deviceState != DeviceState.IDLE) {
+            stopConversation()
         }
-        if (reminderTts == null) {
-            pendingReminderSpeech = text
-            initReminderTts()
-            return
-        }
-        if (reminderTtsReady) {
-            reminderTts?.setSpeechRate(0.85f)
-            val code = reminderTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "xiaozhi_reminder")
-            if (code != TextToSpeech.SUCCESS) {
-                playFallbackReminderTone()
-            }
-        } else {
-            pendingReminderSpeech = text
+        if (resumeMusicAfterReminder) {
+            resumeMusicAfterReminder = false
+            musicPlayer.resume()
         }
     }
 
@@ -881,6 +881,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     override fun onServerHello(sessionId: String, outputSampleRate: Int) {
         audioEngine.ensurePlaybackStarted(outputSampleRate)
+        val reminderPrompt = pendingReminderPrompt
+        if (reminderPrompt != null) {
+            pendingReminderPrompt = null
+            wsClient.sendWakeWordDetected(reminderPrompt)
+            return
+        }
         pendingWakeKeyword?.let { kw ->
             wsClient.sendWakeWordDetected(kw)
             pendingWakeKeyword = null
@@ -916,6 +922,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     override fun onTtsStop() {
         if (ignoreNextTtsStop) {
             ignoreNextTtsStop = false
+            return
+        }
+        if (isReminderActive) {
+            serviceScope.launch {
+                delay(1200L)
+                finishReminderAndResumeMusic()
+            }
             return
         }
         if (phoneCallManager.hasPendingCall()) {
@@ -959,6 +972,17 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onClosed(reason: String, isError: Boolean) {
+        if (isReminderActive && isError) {
+            pendingReminderPrompt = null
+            playFallbackReminderTone()
+            reminderTimeoutJob?.cancel()
+            reminderTimeoutJob = serviceScope.launch {
+                delay(4000L)
+                runCatching { fallbackRingtone?.stop() }
+                fallbackRingtone = null
+                finishReminderAndResumeMusic()
+            }
+        }
         audioEngine.exitWordEnabled = false
         ignoreNextTtsStop = false
         if (_uiState.value.powerSaveEnabled) {
@@ -1129,12 +1153,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         networkCallback?.let { cb ->
             runCatching { connectivityManager?.unregisterNetworkCallback(cb) }
         }
-        runCatching {
-            reminderTts?.stop()
-            reminderTts?.shutdown()
-        }
-        reminderTts = null
-        reminderTtsReady = false
+        reminderTimeoutJob?.cancel()
+        pendingReminderPrompt = null
+        isReminderActive = false
+        resumeMusicAfterReminder = false
+        runCatching { fallbackRingtone?.stop() }
+        fallbackRingtone = null
         batteryAlertMonitor.stop()
         activationJob?.cancel()
         wsClient.disconnect()
