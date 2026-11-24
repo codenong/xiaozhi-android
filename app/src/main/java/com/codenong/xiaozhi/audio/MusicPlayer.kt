@@ -17,16 +17,20 @@ class MusicPlayer(
     private val onStateChanged: (MusicPlaybackState) -> Unit
 ) {
     private var mediaPlayer: MediaPlayer? = null
+    private var currentUrl: String? = null
     private var currentTitle: String? = null
+    private var lastPositionMs: Int = 0
     private var isPrepared: Boolean = false
     private var isBuffering: Boolean = false
     private var deferredStart: Boolean = false
     private var pausedByUserOrChat: Boolean = false
 
     @Synchronized
-    fun play(url: String, title: String?, deferStart: Boolean) {
+    fun play(url: String, title: String?, deferStart: Boolean, seekToMs: Int = 0) {
         stopInternal(notify = false)
+        currentUrl = url
         currentTitle = title?.takeIf { it.isNotBlank() } ?: "在线音乐"
+        lastPositionMs = seekToMs
         isPrepared = false
         isBuffering = true
         deferredStart = deferStart
@@ -47,8 +51,13 @@ class MusicPlayer(
                 if (mediaPlayer !== player) return@setOnPreparedListener
                 isPrepared = true
                 isBuffering = false
+                if (lastPositionMs > 0) {
+                    runCatching { player.seekTo(lastPositionMs) }
+                    lastPositionMs = 0
+                }
                 if (!deferredStart && !pausedByUserOrChat) {
                     runCatching { player.start() }
+                        .onFailure { Log.e(TAG, "MediaPlayer start failed: ${it.message}", it) }
                 }
                 notifyState()
             }
@@ -87,6 +96,7 @@ class MusicPlayer(
         val mp = mediaPlayer ?: return
         if (isPrepared && !pausedByUserOrChat) {
             runCatching { mp.start() }
+                .onFailure { Log.e(TAG, "startDeferred failed: ${it.message}", it) }
             notifyState()
         }
     }
@@ -97,24 +107,51 @@ class MusicPlayer(
         pausedByUserOrChat = true
         deferredStart = false
         if (isPrepared && mp.isPlaying) {
+            lastPositionMs = runCatching { mp.currentPosition }.getOrDefault(0)
             runCatching { mp.pause() }
+                .onFailure { Log.w(TAG, "pause failed: ${it.message}", it) }
             notifyState()
             return true
         }
+        notifyState()
         return false
     }
 
     @Synchronized
     fun resume(): Boolean {
-        val mp = mediaPlayer ?: return false
+        val url = currentUrl
+        val title = currentTitle
+        val mp = mediaPlayer
+        if (mp == null) {
+            if (!url.isNullOrBlank()) {
+                play(url, title, deferStart = false, seekToMs = lastPositionMs)
+                return true
+            }
+            return false
+        }
         pausedByUserOrChat = false
         deferredStart = false
-        if (isPrepared && !mp.isPlaying) {
-            runCatching { mp.start() }
+        if (!isPrepared) {
             notifyState()
             return true
         }
-        return false
+        if (!mp.isPlaying) {
+            val started = runCatching {
+                mp.start()
+                mp.isPlaying
+            }.onFailure { err ->
+                Log.w(TAG, "resume start failed, will re-prepare: ${err.message}", err)
+            }.getOrDefault(false)
+
+            if (!started && !url.isNullOrBlank()) {
+                play(url, title, deferStart = false, seekToMs = lastPositionMs)
+                return true
+            }
+            notifyState()
+            return started
+        }
+        notifyState()
+        return true
     }
 
     @Synchronized
@@ -136,7 +173,9 @@ class MusicPlayer(
     private fun stopInternal(notify: Boolean) {
         val mp = mediaPlayer
         mediaPlayer = null
+        currentUrl = null
         currentTitle = null
+        lastPositionMs = 0
         isPrepared = false
         isBuffering = false
         deferredStart = false
