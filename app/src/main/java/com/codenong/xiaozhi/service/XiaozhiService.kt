@@ -15,6 +15,9 @@ import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.media.AudioAttributes
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import com.codenong.xiaozhi.MainActivity
@@ -93,6 +96,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private lateinit var reminderManager: ReminderManager
     private var reminderTts: TextToSpeech? = null
     private var reminderTtsReady: Boolean = false
+    private var reminderTtsFailed: Boolean = false
+    private var pendingReminderSpeech: String? = null
+    private var fallbackRingtone: Ringtone? = null
     private var deferredMusicJob: Job? = null
     private var deferredCallJob: Job? = null
 
@@ -264,6 +270,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
         batteryAlertMonitor = BatteryAlertMonitor(applicationContext)
         batteryAlertMonitor.start()
+        initReminderTts()
         registerNetworkMonitor()
         createNotificationChannel()
         startForegroundCompat("小智正在后台待机聆听")
@@ -459,8 +466,49 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     fun dismissReminder() {
+        pendingReminderSpeech = null
         runCatching { reminderTts?.stop() }
+        runCatching { fallbackRingtone?.stop() }
+        fallbackRingtone = null
         _uiState.update { it.copy(activeReminderMessage = null) }
+    }
+
+    private fun initReminderTts() {
+        if (reminderTts != null) return
+        reminderTts = TextToSpeech(applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val engine = reminderTts ?: return@TextToSpeech
+                val res = engine.setLanguage(Locale.SIMPLIFIED_CHINESE)
+                if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    val zhRes = engine.setLanguage(Locale.CHINESE)
+                    if (zhRes == TextToSpeech.LANG_MISSING_DATA || zhRes == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        reminderTtsFailed = true
+                    }
+                }
+                engine.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                engine.setSpeechRate(0.85f)
+                reminderTtsReady = !reminderTtsFailed
+                pendingReminderSpeech?.let { pending ->
+                    pendingReminderSpeech = null
+                    if (reminderTtsReady) {
+                        engine.speak(pending, TextToSpeech.QUEUE_FLUSH, null, "xiaozhi_reminder")
+                    } else {
+                        playFallbackReminderTone()
+                    }
+                }
+            } else {
+                reminderTtsFailed = true
+                if (pendingReminderSpeech != null) {
+                    pendingReminderSpeech = null
+                    playFallbackReminderTone()
+                }
+            }
+        }
     }
 
     private fun handleReminderFired(reminderId: Int, message: String) {
@@ -476,18 +524,34 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun speakReminderText(text: String) {
+        if (reminderTtsFailed) {
+            playFallbackReminderTone()
+            return
+        }
         if (reminderTts == null) {
-            reminderTts = TextToSpeech(applicationContext) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    reminderTtsReady = true
-                    reminderTts?.language = Locale.SIMPLIFIED_CHINESE
-                    reminderTts?.setSpeechRate(0.85f)
-                    reminderTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "xiaozhi_reminder")
-                }
-            }
-        } else if (reminderTtsReady) {
+            pendingReminderSpeech = text
+            initReminderTts()
+            return
+        }
+        if (reminderTtsReady) {
             reminderTts?.setSpeechRate(0.85f)
-            reminderTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "xiaozhi_reminder")
+            val code = reminderTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "xiaozhi_reminder")
+            if (code != TextToSpeech.SUCCESS) {
+                playFallbackReminderTone()
+            }
+        } else {
+            pendingReminderSpeech = text
+        }
+    }
+
+    private fun playFallbackReminderTone() {
+        runCatching {
+            fallbackRingtone?.stop()
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val ring = RingtoneManager.getRingtone(applicationContext, uri)
+            fallbackRingtone = ring
+            ring?.play()
         }
     }
 
