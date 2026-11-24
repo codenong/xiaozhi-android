@@ -102,6 +102,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private var isReminderActive: Boolean = false
     @Volatile
     private var resumeMusicAfterReminder: Boolean = false
+    @Volatile
+    private var lastFiredReminderMessage: String? = null
     private var deferredMusicJob: Job? = null
     private var deferredCallJob: Job? = null
 
@@ -209,6 +211,15 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             },
             reminderControl = object : ReminderControlListener {
                 override fun onGetCurrentTime(): String = reminderManager.getCurrentTimeJson()
+
+                override fun onGetFiredReminder(): String {
+                    val msg = lastFiredReminderMessage
+                    return if (msg.isNullOrBlank()) {
+                        "当前没有刚触发的闹钟提醒"
+                    } else {
+                        "刚刚触发的提醒内容是：$msg。请直接用简短清晰的语气语音提醒用户：时间到了，请记得$msg。"
+                    }
+                }
 
                 override fun onCreateReminder(
                     message: String,
@@ -496,6 +507,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             resumeMusicAfterReminder = true
             musicPlayer.pause()
         }
+        lastFiredReminderMessage = message
         _uiState.update { it.copy(activeReminderMessage = message) }
         updateNotification("⏰ 提醒：$message")
 
@@ -513,7 +525,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             return
         }
 
-        val prompt = "现在是定时提醒时间，请直接用简短清晰的语气语音提醒用户（不要反问）：时间到了，请记得$message"
+        val prompt = "闹钟响了"
         isReminderActive = true
         pendingReminderPrompt = prompt
 
@@ -1012,6 +1024,17 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     override fun onAlert(status: String, message: String, emotion: String) {
         _uiState.update {
             it.copy(subtitle = "[$status] $message", emotion = emotion.ifBlank { "neutral" })
+        }
+        if (isReminderActive && status.equals("error", ignoreCase = true)) {
+            pendingReminderPrompt = null
+            playFallbackReminderTone()
+            reminderTimeoutJob?.cancel()
+            reminderTimeoutJob = serviceScope.launch {
+                delay(4000L)
+                runCatching { fallbackRingtone?.stop() }
+                fallbackRingtone = null
+                finishReminderAndResumeMusic()
+            }
         }
     }
 

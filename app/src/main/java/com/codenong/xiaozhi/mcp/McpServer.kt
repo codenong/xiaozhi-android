@@ -22,6 +22,7 @@ interface PhoneControlListener {
 
 interface ReminderControlListener {
     fun onGetCurrentTime(): String
+    fun onGetFiredReminder(): String
     fun onCreateReminder(message: String, delaySeconds: Long?, triggerAt: String?): Pair<String, Boolean>
     fun onListReminders(): String
     fun onCancelReminder(id: Int?, keyword: String?): String
@@ -188,6 +189,11 @@ class McpServer(
                 properties = JSONObject()
             ))
             put(toolSchema(
+                name = "self.reminder.get_fired_alert",
+                description = "Get the reminder message that just fired when '闹钟响了' is received, then speak it aloud clearly to remind the user.",
+                properties = JSONObject()
+            ))
+            put(toolSchema(
                 name = "self.reminder.cancel",
                 description = "Cancel pending reminder(s) by numeric id or keyword.",
                 properties = JSONObject().apply {
@@ -281,6 +287,9 @@ class McpServer(
             }
             "self.reminder.list" -> {
                 (reminderControl?.onListReminders() ?: "Reminder unavailable") to false
+            }
+            "self.reminder.get_fired_alert" -> {
+                (reminderControl?.onGetFiredReminder() ?: "暂无刚触发的提醒") to false
             }
             "self.reminder.cancel" -> {
                 val remId = if (args.has("id") && !args.isNull("id")) {
