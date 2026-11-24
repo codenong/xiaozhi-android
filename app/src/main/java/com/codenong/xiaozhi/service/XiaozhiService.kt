@@ -24,6 +24,9 @@ import com.codenong.xiaozhi.audio.WakeWordDetector
 import com.codenong.xiaozhi.data.DeviceIdentityStore
 import com.codenong.xiaozhi.mcp.McpServer
 import com.codenong.xiaozhi.mcp.MusicControlListener
+import com.codenong.xiaozhi.mcp.PhoneControlListener
+import com.codenong.xiaozhi.phone.CallPrepareResult
+import com.codenong.xiaozhi.phone.PhoneCallManager
 import com.codenong.xiaozhi.model.ActivationInfo
 import com.codenong.xiaozhi.model.DeviceState
 import com.codenong.xiaozhi.model.WebSocketConfig
@@ -80,7 +83,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private lateinit var wsClient: XiaozhiWebSocketClient
     private lateinit var audioEngine: AudioEngine
     private lateinit var musicPlayer: MusicPlayer
+    private lateinit var phoneCallManager: PhoneCallManager
     private var deferredMusicJob: Job? = null
+    private var deferredCallJob: Job? = null
 
     private lateinit var batteryAlertMonitor: BatteryAlertMonitor
     private var wakeLock: PowerManager.WakeLock? = null
@@ -114,6 +119,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 )
             }
         }
+        phoneCallManager = PhoneCallManager(applicationContext) { inCall ->
+            serviceScope.launch {
+                handleSystemCallStateChanged(inCall)
+            }
+        }
+        phoneCallManager.startMonitoring()
         mcpServer = McpServer(
             context = applicationContext,
             onBrightnessRequest = { brightness ->
@@ -140,6 +151,40 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 override fun onResumeMusic(): String {
                     serviceScope.launch { musicPlayer.resume() }
                     return "已继续播放音乐"
+                }
+            },
+            phoneControl = object : PhoneControlListener {
+                override fun onCallTarget(target: String): Pair<String, Boolean> {
+                    return when (val res = phoneCallManager.prepareCall(target)) {
+                        is CallPrepareResult.ReadyToCall -> {
+                            serviceScope.launch {
+                                scheduleDeferredPhoneCall()
+                            }
+                            val label = res.displayName?.let { "$it（${res.number}）" } ?: res.number
+                            val routeHint = if (phoneCallManager.hasBluetoothAudioConnected()) {
+                                "，将使用蓝牙免提"
+                            } else {
+                                "，将自动开启外放"
+                            }
+                            "正在为您拨打给 $label$routeHint" to false
+                        }
+
+                        is CallPrepareResult.MultipleMatches -> {
+                            val listText = res.matches.joinToString("；") { "${it.name} ${it.number}" }
+                            "找到多个匹配联系人，请向用户确认要拨打哪一位：$listText" to false
+                        }
+
+                        is CallPrepareResult.Error -> res.message to true
+                    }
+                }
+
+                override fun onSearchContact(name: String): String {
+                    val list = phoneCallManager.searchContacts(name)
+                    return if (list.isEmpty()) {
+                        "通讯录中未找到与「$name」匹配的联系人"
+                    } else {
+                        list.joinToString("；") { "${it.name}: ${it.number}" }
+                    }
                 }
             }
         )
@@ -204,7 +249,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     fun onMicPermissionChanged(granted: Boolean) {
         hasMicPermission = granted
-        if (granted && _uiState.value.deviceState == DeviceState.IDLE) {
+        phoneCallManager.startMonitoring()
+        if (granted && _uiState.value.deviceState == DeviceState.IDLE && !phoneCallManager.isInSystemCall) {
             maybeStartWakeWordListening()
         }
     }
@@ -347,6 +393,82 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         musicPlayer.stop()
     }
 
+    private fun scheduleDeferredPhoneCall() {
+        deferredCallJob?.cancel()
+        deferredCallJob = serviceScope.launch {
+            delay(2000L)
+            if (phoneCallManager.hasPendingCall()) {
+                executePendingCallAndIdle()
+            }
+        }
+    }
+
+    private fun executePendingCallAndIdle() {
+        deferredCallJob?.cancel()
+        if (!phoneCallManager.hasPendingCall()) return
+        if (_uiState.value.deviceState != DeviceState.IDLE) {
+            isUserDisconnecting = true
+            ignoreNextTtsStop = false
+            audioEngine.exitWordEnabled = false
+            wsClient.sendStopListening()
+            audioEngine.pausePlayback()
+            audioEngine.restoreAudioMode()
+            releaseWifiLock()
+            wsClient.disconnect()
+        }
+        audioEngine.stopCapture()
+        _uiState.update {
+            it.copy(
+                deviceState = DeviceState.IDLE,
+                emotion = "neutral",
+                emoji = "📞",
+                subtitle = "正在呼出电话..."
+            )
+        }
+        phoneCallManager.executePendingCall()
+    }
+
+    private fun handleSystemCallStateChanged(inCall: Boolean) {
+        if (inCall) {
+            if (musicPlayer.isActive()) {
+                musicPlayer.pause()
+            }
+            if (_uiState.value.deviceState != DeviceState.IDLE) {
+                isUserDisconnecting = true
+                ignoreNextTtsStop = false
+                audioEngine.exitWordEnabled = false
+                wsClient.sendAbort("system_call")
+                wsClient.sendStopListening()
+                audioEngine.pausePlayback()
+                audioEngine.restoreAudioMode()
+                releaseWifiLock()
+                wsClient.disconnect()
+            }
+            audioEngine.stopCapture()
+            _uiState.update {
+                it.copy(
+                    deviceState = DeviceState.IDLE,
+                    emoji = "📞",
+                    subtitle = "系统通话中，已暂停小智语音"
+                )
+            }
+            updateNotification("通话中 · 已暂停小智语音")
+        } else {
+            _uiState.update {
+                it.copy(
+                    deviceState = DeviceState.IDLE,
+                    emoji = "🤖",
+                    subtitle = idleHint()
+                )
+            }
+            if (_uiState.value.handsFreeWakeEnabled && hasMicPermission) {
+                maybeStartWakeWordListening()
+            } else {
+                updateNotification("小智已待机")
+            }
+        }
+    }
+
     fun toggleMusicPlayback() {
         if (_uiState.value.isMusicPlaying) {
             musicPlayer.pause()
@@ -358,6 +480,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     fun shutdownService() {
         isUserDisconnecting = true
+        deferredCallJob?.cancel()
+        phoneCallManager.cancelPendingCall()
+        phoneCallManager.stopMonitoring()
         deferredMusicJob?.cancel()
         activationJob?.cancel()
         runCatching { wsClient.sendAbort("app_exit") }
@@ -602,6 +727,10 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             ignoreNextTtsStop = false
             return
         }
+        if (phoneCallManager.hasPendingCall()) {
+            executePendingCallAndIdle()
+            return
+        }
         if (musicPlayer.hasDeferredStart()) {
             startMusicAndReturnIdle()
             return
@@ -812,6 +941,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         batteryAlertMonitor.stop()
         activationJob?.cancel()
         wsClient.disconnect()
+        deferredCallJob?.cancel()
+        phoneCallManager.stopMonitoring()
         deferredMusicJob?.cancel()
         musicPlayer.release()
         audioEngine.release()

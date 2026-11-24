@@ -15,10 +15,16 @@ interface MusicControlListener {
     fun onResumeMusic(): String
 }
 
+interface PhoneControlListener {
+    fun onCallTarget(target: String): Pair<String, Boolean>
+    fun onSearchContact(name: String): String
+}
+
 class McpServer(
     private val context: Context,
     private val onBrightnessRequest: (Int) -> Unit,
-    private val musicControl: MusicControlListener? = null
+    private val musicControl: MusicControlListener? = null,
+    private val phoneControl: PhoneControlListener? = null
 ) {
     fun handleRequest(payload: JSONObject): JSONObject? {
         val id = payload.opt("id")
@@ -126,6 +132,24 @@ class McpServer(
                 description = "Resume paused music on the device.",
                 properties = JSONObject()
             ))
+            put(toolSchema(
+                name = "self.phone.call",
+                description = "Place a phone call to a contact name or phone number directly on the Android device (auto-uses Bluetooth hands-free if connected, otherwise speakerphone).",
+                properties = JSONObject().put("target", JSONObject().apply {
+                    put("type", "string")
+                    put("description", "Contact name (e.g. 张三) or phone number (e.g. 13800138000)")
+                }),
+                required = listOf("target")
+            ))
+            put(toolSchema(
+                name = "self.phone.search_contact",
+                description = "Search contacts by name to find matching phone numbers.",
+                properties = JSONObject().put("name", JSONObject().apply {
+                    put("type", "string")
+                    put("description", "Contact name keyword")
+                }),
+                required = listOf("name")
+            ))
         }
 
         val result = JSONObject().apply {
@@ -173,6 +197,22 @@ class McpServer(
             }
             "self.music.resume" -> {
                 (musicControl?.onResumeMusic() ?: "Music player unavailable") to false
+            }
+            "self.phone.call" -> {
+                val target = args.optString("target", "").trim()
+                if (target.isEmpty()) {
+                    "Missing target" to true
+                } else {
+                    phoneControl?.onCallTarget(target) ?: ("Phone control unavailable" to true)
+                }
+            }
+            "self.phone.search_contact" -> {
+                val contactName = args.optString("name", "").trim()
+                if (contactName.isEmpty()) {
+                    "Missing name" to true
+                } else {
+                    (phoneControl?.onSearchContact(contactName) ?: "Phone control unavailable") to false
+                }
             }
             else -> "Unknown tool: $name" to true
         }

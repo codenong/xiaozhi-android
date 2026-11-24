@@ -39,11 +39,16 @@ class MainActivity : ComponentActivity() {
             }
 
             val permissionsToRequest = remember {
+                val base = mutableListOf(
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.CALL_PHONE,
+                    Manifest.permission.READ_CONTACTS,
+                    Manifest.permission.READ_PHONE_STATE
+                )
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
-                } else {
-                    arrayOf(Manifest.permission.RECORD_AUDIO)
+                    base += Manifest.permission.POST_NOTIFICATIONS
                 }
+                base.toTypedArray()
             }
 
             val launcher = rememberLauncherForActivityResult(
