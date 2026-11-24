@@ -83,7 +83,7 @@ fun RobotFaceScreen(
     onRequestMicPermission: () -> Unit,
     onTapFace: () -> Unit,
     onEndConversation: () -> Unit,
-    onStopMusic: () -> Unit,
+    onToggleMusicPlayback: () -> Unit,
     onExitApp: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onToggleHandsFreeWake: () -> Unit,
@@ -328,21 +328,27 @@ fun RobotFaceScreen(
                     state.musicTitle?.let { title ->
                         Spacer(Modifier.height(16.dp))
                         Card(
+                            modifier = Modifier.widthIn(max = 420.dp),
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2630)),
                             shape = RoundedCornerShape(14.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            Column(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = if (state.isMusicPlaying) "🎵 正在播放：$title" else "🎵 音乐已就绪：$title",
+                                    text = if (state.isMusicPlaying) "🎵 正在播放：$title" else "🎵 已暂停：$title",
                                     color = Color(0xFF58A6FF),
-                                    fontSize = 14.sp
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center
                                 )
-                                OutlinedButton(onClick = onStopMusic) {
-                                    Text("停止", color = Color.White, fontSize = 13.sp)
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(onClick = onToggleMusicPlayback) {
+                                    Text(
+                                        text = if (state.isMusicPlaying) "暂停" else "播放",
+                                        color = Color.White,
+                                        fontSize = 13.sp
+                                    )
                                 }
                             }
                         }

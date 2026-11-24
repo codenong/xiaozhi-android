@@ -339,6 +339,15 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         musicPlayer.stop()
     }
 
+    fun toggleMusicPlayback() {
+        if (_uiState.value.isMusicPlaying) {
+            musicPlayer.pause()
+        } else {
+            deferredMusicJob?.cancel()
+            musicPlayer.resume()
+        }
+    }
+
     fun shutdownService() {
         isUserDisconnecting = true
         deferredMusicJob?.cancel()

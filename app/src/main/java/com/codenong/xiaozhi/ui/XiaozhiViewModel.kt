@@ -98,6 +98,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     fun onFaceTapped() = service?.onFaceTapped()
     fun endConversation() = service?.endConversation()
     fun stopMusic() = service?.stopMusic()
+    fun toggleMusicPlayback() = service?.toggleMusicPlayback()
 
     fun shutdownApp() {
         service?.shutdownService()
