@@ -19,12 +19,10 @@ x iǎo zh ì t óng x ué :1.5 #0.25 @小智同学
 
 ## 推送到 GitHub 并自动编译
 仓库已配置 `.github/workflows/android-build.yml`，推送代码后 GitHub Actions 会自动下载 Sherpa-ONNX AAR 与唤醒词模型并输出 `app-debug.apk`：
-```bash
-unzip xiaozhi-android-mvp.zip -d xiaozhi-android
-cd xiaozhi-android
-git init -b main
-git add .
-git commit -m "feat: xiaozhi-android with offline wake word"
-git remote add origin https://github.com/codenong/xiaozhi-android.git
-git push -u origin main
 ```
+
+## License
+This project is licensed under the GNU General Public License v3.0.
+See the [LICENSE](./LICENSE) file for details.
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)

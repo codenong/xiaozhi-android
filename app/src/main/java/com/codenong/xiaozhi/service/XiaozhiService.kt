@@ -54,7 +54,7 @@ data class XiaozhiUiState(
     val deviceId: String = "",
     val autoContinue: Boolean = true,
     val handsFreeWakeEnabled: Boolean = true,
-    val powerSaveEnabled: Boolean = true,
+    val powerSaveEnabled: Boolean = false,
     val availableWakeWords: List<String> = emptyList(),
     val activeWakeWord: String = "",
     val errorMessage: String? = null,

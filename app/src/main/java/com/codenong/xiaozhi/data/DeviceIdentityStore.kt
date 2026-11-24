@@ -53,7 +53,7 @@ class DeviceIdentityStore(context: Context) {
         prefs.edit().putBoolean(KEY_GUIDE_SEEN, seen).apply()
     }
 
-    fun isPowerSaveEnabled(): Boolean = prefs.getBoolean(KEY_POWER_SAVE_ENABLED, true)
+    fun isPowerSaveEnabled(): Boolean = prefs.getBoolean(KEY_POWER_SAVE_ENABLED, false)
 
     fun setPowerSaveEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_POWER_SAVE_ENABLED, enabled).apply()

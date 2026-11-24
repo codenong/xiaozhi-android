@@ -57,7 +57,7 @@ class AudioEngine(
     var exitWordEnabled: Boolean = false
 
     @Volatile
-    var powerSaveEnabled: Boolean = true
+    var powerSaveEnabled: Boolean = false
 
     @Volatile
     private var exitWordCooldownUntilMs: Long = 0L
