@@ -112,6 +112,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     }
     fun toggleAutoContinue() = service?.toggleAutoContinue()
     fun toggleHandsFreeWake() = service?.toggleHandsFreeWake()
+    fun togglePowerSaveMode() = service?.togglePowerSaveMode()
     fun selectWakeWord(wakeWord: String) = service?.selectWakeWord(wakeWord)
     fun updateOtaUrl(newUrl: String) = service?.updateOtaUrl(newUrl)
 

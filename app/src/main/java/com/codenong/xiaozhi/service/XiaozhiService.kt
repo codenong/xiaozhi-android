@@ -54,6 +54,7 @@ data class XiaozhiUiState(
     val deviceId: String = "",
     val autoContinue: Boolean = true,
     val handsFreeWakeEnabled: Boolean = true,
+    val powerSaveEnabled: Boolean = true,
     val availableWakeWords: List<String> = emptyList(),
     val activeWakeWord: String = "",
     val errorMessage: String? = null,
@@ -172,6 +173,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         createNotificationChannel()
         startForegroundCompat("小智正在后台待机聆听")
 
+        val savedPowerSave = identityStore.isPowerSaveEnabled()
+        audioEngine.powerSaveEnabled = savedPowerSave
         val identity = identityStore.getIdentity()
         val entries = wakeWordDetector.loadWakeWordEntries().map { it.displayName }
         val savedWake = identityStore.getSelectedWakeWord()
@@ -185,6 +188,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             it.copy(
                 otaUrl = identity.otaUrl,
                 deviceId = identity.deviceId,
+                powerSaveEnabled = savedPowerSave,
                 availableWakeWords = entries,
                 activeWakeWord = effectiveWake
             )
@@ -313,9 +317,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             ignoreNextTtsStop = false
             audioEngine.exitWordEnabled = false
             wsClient.sendStopListening()
-            audioEngine.pausePlayback()
+            if (_uiState.value.powerSaveEnabled) {
+                audioEngine.pausePlayback()
+                releaseWifiLock()
+            } else {
+                audioEngine.clearPlayback()
+            }
             audioEngine.restoreAudioMode()
-            releaseWifiLock()
             wsClient.disconnect()
             _uiState.update {
                 it.copy(
@@ -393,6 +401,21 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         _uiState.update { it.copy(autoContinue = !it.autoContinue) }
     }
 
+    fun togglePowerSaveMode() {
+        val next = !_uiState.value.powerSaveEnabled
+        identityStore.setPowerSaveEnabled(next)
+        audioEngine.powerSaveEnabled = next
+        _uiState.update { it.copy(powerSaveEnabled = next) }
+        if (_uiState.value.deviceState == DeviceState.IDLE && _uiState.value.handsFreeWakeEnabled) {
+            if (next) {
+                releaseWifiLock()
+                audioEngine.pausePlayback()
+            } else {
+                acquireWifiLock()
+            }
+        }
+    }
+
     fun toggleHandsFreeWake() {
         val next = !_uiState.value.handsFreeWakeEnabled
         _uiState.update {
@@ -436,6 +459,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private fun maybeStartWakeWordListening() {
         if (hasMicPermission && _uiState.value.handsFreeWakeEnabled) {
             acquireWakeLock()
+            if (!_uiState.value.powerSaveEnabled) {
+                acquireWifiLock()
+            }
             val active = _uiState.value.activeWakeWord.ifBlank { null }
             audioEngine.exitWordEnabled = _uiState.value.deviceState == DeviceState.SPEAKING
             audioEngine.startWakeWordDetection(active)
@@ -511,9 +537,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         audioEngine.exitWordEnabled = false
         wsClient.sendAbort("user_exit")
         wsClient.sendStopListening()
-        audioEngine.pausePlayback()
+        if (_uiState.value.powerSaveEnabled) {
+            audioEngine.pausePlayback()
+            releaseWifiLock()
+        } else {
+            audioEngine.clearPlayback()
+        }
         audioEngine.restoreAudioMode()
-        releaseWifiLock()
         wsClient.disconnect()
         _uiState.update {
             it.copy(
@@ -611,9 +641,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     override fun onClosed(reason: String, isError: Boolean) {
         audioEngine.exitWordEnabled = false
         ignoreNextTtsStop = false
-        audioEngine.pausePlayback()
+        if (_uiState.value.powerSaveEnabled) {
+            audioEngine.pausePlayback()
+            releaseWifiLock()
+        } else {
+            audioEngine.clearPlayback()
+        }
         audioEngine.restoreAudioMode()
-        releaseWifiLock()
         val userEnded = isUserDisconnecting
         isUserDisconnecting = false
         val showDisconnectError = !userEnded && (isError || !isNetworkAvailable)

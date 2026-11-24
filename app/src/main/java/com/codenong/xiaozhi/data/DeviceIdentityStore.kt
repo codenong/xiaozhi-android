@@ -53,6 +53,12 @@ class DeviceIdentityStore(context: Context) {
         prefs.edit().putBoolean(KEY_GUIDE_SEEN, seen).apply()
     }
 
+    fun isPowerSaveEnabled(): Boolean = prefs.getBoolean(KEY_POWER_SAVE_ENABLED, true)
+
+    fun setPowerSaveEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_POWER_SAVE_ENABLED, enabled).apply()
+    }
+
     private fun generateVirtualMac(): String {
         val random = SecureRandom()
         val bytes = ByteArray(6)
@@ -71,5 +77,6 @@ class DeviceIdentityStore(context: Context) {
         private const val KEY_UPDATE_URL = "update_check_url"
         private const val KEY_GUIDE_URL = "guide_url"
         private const val KEY_GUIDE_SEEN = "guide_seen"
+        private const val KEY_POWER_SAVE_ENABLED = "power_save_enabled"
     }
 }

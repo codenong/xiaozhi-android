@@ -87,6 +87,7 @@ fun RobotFaceScreen(
     onExitApp: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onToggleHandsFreeWake: () -> Unit,
+    onTogglePowerSaveMode: () -> Unit,
     onSelectWakeWord: (String) -> Unit,
     onSaveOtaUrl: (String) -> Unit,
     onSaveUpdateUrl: (String) -> Unit,
@@ -357,26 +358,37 @@ fun RobotFaceScreen(
             }
         }
 
-        Row(
+        FlowRow(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("免手触唤醒", color = Color(0xFF8B949E), fontSize = 14.sp)
-            Switch(
-                checked = state.handsFreeWakeEnabled,
-                onCheckedChange = { onToggleHandsFreeWake() },
-                modifier = Modifier.padding(start = 8.dp)
-            )
-            Spacer(Modifier.width(24.dp))
-            Text("连续对话", color = Color(0xFF8B949E), fontSize = 14.sp)
-            Switch(
-                checked = state.autoContinue,
-                onCheckedChange = { onToggleAutoContinue() },
-                modifier = Modifier.padding(start = 8.dp)
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("免手触唤醒", color = Color(0xFF8B949E), fontSize = 14.sp)
+                Switch(
+                    checked = state.handsFreeWakeEnabled,
+                    onCheckedChange = { onToggleHandsFreeWake() },
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("连续对话", color = Color(0xFF8B949E), fontSize = 14.sp)
+                Switch(
+                    checked = state.autoContinue,
+                    onCheckedChange = { onToggleAutoContinue() },
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("省电模式", color = Color(0xFF8B949E), fontSize = 14.sp)
+                Switch(
+                    checked = state.powerSaveEnabled,
+                    onCheckedChange = { onTogglePowerSaveMode() },
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
         }
     }
 

@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
                 },
                 onToggleAutoContinue = { viewModel.toggleAutoContinue() },
                 onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },
+                onTogglePowerSaveMode = { viewModel.togglePowerSaveMode() },
                 onSelectWakeWord = { viewModel.selectWakeWord(it) },
                 onSaveOtaUrl = { viewModel.updateOtaUrl(it) },
                 onSaveUpdateUrl = { viewModel.saveUpdateUrl(it) },

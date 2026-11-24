@@ -57,6 +57,9 @@ class AudioEngine(
     var exitWordEnabled: Boolean = false
 
     @Volatile
+    var powerSaveEnabled: Boolean = true
+
+    @Volatile
     private var exitWordCooldownUntilMs: Long = 0L
 
     private var kwsActiveUntilMs: Long = 0L
@@ -142,11 +145,11 @@ class AudioEngine(
 
                 when (captureMode) {
                     CaptureMode.WAKE_WORD -> {
-                        if (exitWordEnabled) {
+                        if (exitWordEnabled || !powerSaveEnabled) {
                             val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
                             if (keyword != null) {
                                 onWakeWordDetected(keyword)
-                            } else {
+                            } else if (exitWordEnabled) {
                                 val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
                                 if (exitKeyword != null) {
                                     onExitWordDetected(exitKeyword)
