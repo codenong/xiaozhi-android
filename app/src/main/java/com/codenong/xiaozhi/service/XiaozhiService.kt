@@ -18,10 +18,12 @@ import android.os.IBinder
 import android.os.PowerManager
 import com.codenong.xiaozhi.MainActivity
 import com.codenong.xiaozhi.audio.AudioEngine
+import com.codenong.xiaozhi.audio.MusicPlayer
 import com.codenong.xiaozhi.audio.OpusCodec
 import com.codenong.xiaozhi.audio.WakeWordDetector
 import com.codenong.xiaozhi.data.DeviceIdentityStore
 import com.codenong.xiaozhi.mcp.McpServer
+import com.codenong.xiaozhi.mcp.MusicControlListener
 import com.codenong.xiaozhi.model.ActivationInfo
 import com.codenong.xiaozhi.model.DeviceState
 import com.codenong.xiaozhi.model.WebSocketConfig
@@ -55,7 +57,9 @@ data class XiaozhiUiState(
     val availableWakeWords: List<String> = emptyList(),
     val activeWakeWord: String = "",
     val errorMessage: String? = null,
-    val brightnessPercent: Int? = null
+    val brightnessPercent: Int? = null,
+    val musicTitle: String? = null,
+    val isMusicPlaying: Boolean = false
 )
 
 class XiaozhiService : Service(), XiaozhiSocketListener {
@@ -74,6 +78,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private lateinit var mcpServer: McpServer
     private lateinit var wsClient: XiaozhiWebSocketClient
     private lateinit var audioEngine: AudioEngine
+    private lateinit var musicPlayer: MusicPlayer
+    private var deferredMusicJob: Job? = null
 
     private lateinit var batteryAlertMonitor: BatteryAlertMonitor
     private var wakeLock: PowerManager.WakeLock? = null
@@ -99,9 +105,43 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         super.onCreate()
         identityStore = DeviceIdentityStore(applicationContext)
         wakeWordDetector = WakeWordDetector(applicationContext)
-        mcpServer = McpServer(applicationContext) { brightness ->
-            _uiState.update { it.copy(brightnessPercent = brightness) }
+        musicPlayer = MusicPlayer(applicationContext) { playback ->
+            _uiState.update {
+                it.copy(
+                    musicTitle = playback.title,
+                    isMusicPlaying = playback.isPlaying
+                )
+            }
         }
+        mcpServer = McpServer(
+            context = applicationContext,
+            onBrightnessRequest = { brightness ->
+                _uiState.update { it.copy(brightnessPercent = brightness) }
+            },
+            musicControl = object : MusicControlListener {
+                override fun onPlayMusicUrl(url: String, title: String?): String {
+                    serviceScope.launch {
+                        playMusicFromMcp(url, title)
+                    }
+                    return "已开始在设备端缓冲播放${title?.let { "《$it》" } ?: "音乐"}"
+                }
+
+                override fun onStopMusic(): String {
+                    serviceScope.launch { stopMusic() }
+                    return "已停止播放音乐"
+                }
+
+                override fun onPauseMusic(): String {
+                    serviceScope.launch { musicPlayer.pause() }
+                    return "已暂停播放音乐"
+                }
+
+                override fun onResumeMusic(): String {
+                    serviceScope.launch { musicPlayer.resume() }
+                    return "已继续播放音乐"
+                }
+            }
+        )
         wsClient = XiaozhiWebSocketClient(this)
         audioEngine = AudioEngine(
             context = applicationContext,
@@ -247,7 +287,56 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun handleExitWordTriggered() {
+        stopMusic()
         endConversation()
+    }
+
+    private fun playMusicFromMcp(url: String, title: String?) {
+        deferredMusicJob?.cancel()
+        val shouldDefer = _uiState.value.deviceState != DeviceState.IDLE
+        musicPlayer.play(url, title, deferStart = shouldDefer)
+        if (shouldDefer) {
+            deferredMusicJob = serviceScope.launch {
+                delay(2500)
+                if (musicPlayer.hasDeferredStart()) {
+                    startMusicAndReturnIdle()
+                }
+            }
+        }
+    }
+
+    private fun startMusicAndReturnIdle() {
+        deferredMusicJob?.cancel()
+        musicPlayer.startDeferred()
+        if (_uiState.value.deviceState != DeviceState.IDLE) {
+            isUserDisconnecting = true
+            ignoreNextTtsStop = false
+            audioEngine.exitWordEnabled = false
+            wsClient.sendStopListening()
+            audioEngine.pausePlayback()
+            audioEngine.restoreAudioMode()
+            releaseWifiLock()
+            wsClient.disconnect()
+            _uiState.update {
+                it.copy(
+                    deviceState = DeviceState.IDLE,
+                    emotion = "neutral",
+                    emoji = "🤖",
+                    subtitle = idleHint()
+                )
+            }
+            if (_uiState.value.handsFreeWakeEnabled) {
+                maybeStartWakeWordListening()
+            } else {
+                audioEngine.stopCapture()
+                releaseAllLocks()
+            }
+        }
+    }
+
+    fun stopMusic() {
+        deferredMusicJob?.cancel()
+        musicPlayer.stop()
     }
 
     fun endConversation() {
@@ -341,6 +430,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun startConversation() {
+        if (musicPlayer.isActive()) {
+            musicPlayer.pause()
+        }
         if (!isNetworkAvailable) {
             _uiState.update {
                 it.copy(
@@ -455,6 +547,10 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     override fun onTtsStop() {
         if (ignoreNextTtsStop) {
             ignoreNextTtsStop = false
+            return
+        }
+        if (musicPlayer.hasDeferredStart()) {
+            startMusicAndReturnIdle()
             return
         }
         if (_uiState.value.autoContinue) {
@@ -659,6 +755,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         batteryAlertMonitor.stop()
         activationJob?.cancel()
         wsClient.disconnect()
+        deferredMusicJob?.cancel()
+        musicPlayer.release()
         audioEngine.release()
         releaseAllLocks()
         serviceScope.cancel()

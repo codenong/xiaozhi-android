@@ -83,6 +83,7 @@ fun RobotFaceScreen(
     onRequestMicPermission: () -> Unit,
     onTapFace: () -> Unit,
     onEndConversation: () -> Unit,
+    onStopMusic: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onToggleHandsFreeWake: () -> Unit,
     onSelectWakeWord: (String) -> Unit,
@@ -315,6 +316,28 @@ fun RobotFaceScreen(
                             )
                         ) {
                             Text("结束对话")
+                        }
+                    }
+                    state.musicTitle?.let { title ->
+                        Spacer(Modifier.height(16.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2630)),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    text = if (state.isMusicPlaying) "🎵 正在播放：$title" else "🎵 音乐已就绪：$title",
+                                    color = Color(0xFF58A6FF),
+                                    fontSize = 14.sp
+                                )
+                                OutlinedButton(onClick = onStopMusic) {
+                                    Text("停止", color = Color.White, fontSize = 13.sp)
+                                }
+                            }
                         }
                     }
                 }

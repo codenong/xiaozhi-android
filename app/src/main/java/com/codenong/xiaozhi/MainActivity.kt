@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
                 onRequestMicPermission = { launcher.launch(permissionsToRequest) },
                 onTapFace = { viewModel.onFaceTapped() },
                 onEndConversation = { viewModel.endConversation() },
+                onStopMusic = { viewModel.stopMusic() },
                 onToggleAutoContinue = { viewModel.toggleAutoContinue() },
                 onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },
                 onSelectWakeWord = { viewModel.selectWakeWord(it) },

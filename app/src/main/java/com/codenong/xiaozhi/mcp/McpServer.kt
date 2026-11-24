@@ -8,9 +8,17 @@ import android.os.BatteryManager
 import org.json.JSONArray
 import org.json.JSONObject
 
+interface MusicControlListener {
+    fun onPlayMusicUrl(url: String, title: String?): String
+    fun onStopMusic(): String
+    fun onPauseMusic(): String
+    fun onResumeMusic(): String
+}
+
 class McpServer(
     private val context: Context,
-    private val onBrightnessRequest: (Int) -> Unit
+    private val onBrightnessRequest: (Int) -> Unit,
+    private val musicControl: MusicControlListener? = null
 ) {
     fun handleRequest(payload: JSONObject): JSONObject? {
         val id = payload.opt("id")
@@ -88,6 +96,36 @@ class McpServer(
                 }),
                 required = listOf("brightness")
             ))
+            put(toolSchema(
+                name = "self.music.play_url",
+                description = "Play an audio/music HTTP(S) stream URL directly on the Android device speaker.",
+                properties = JSONObject().apply {
+                    put("url", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Direct HTTP/HTTPS audio URL (e.g. mp3/m4a)")
+                    })
+                    put("title", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Optional song title and artist")
+                    })
+                },
+                required = listOf("url")
+            ))
+            put(toolSchema(
+                name = "self.music.stop",
+                description = "Stop currently playing music on the device.",
+                properties = JSONObject()
+            ))
+            put(toolSchema(
+                name = "self.music.pause",
+                description = "Pause currently playing music on the device.",
+                properties = JSONObject()
+            ))
+            put(toolSchema(
+                name = "self.music.resume",
+                description = "Resume paused music on the device.",
+                properties = JSONObject()
+            ))
         }
 
         val result = JSONObject().apply {
@@ -117,6 +155,24 @@ class McpServer(
                 val brightness = args.optInt("brightness", 80).coerceIn(0, 100)
                 onBrightnessRequest(brightness)
                 "true" to false
+            }
+            "self.music.play_url" -> {
+                val url = args.optString("url", "").trim()
+                val title = args.optString("title", "").trim().ifEmpty { null }
+                if (url.isEmpty()) {
+                    "Missing url" to true
+                } else {
+                    (musicControl?.onPlayMusicUrl(url, title) ?: "Music player unavailable") to false
+                }
+            }
+            "self.music.stop" -> {
+                (musicControl?.onStopMusic() ?: "Music player unavailable") to false
+            }
+            "self.music.pause" -> {
+                (musicControl?.onPauseMusic() ?: "Music player unavailable") to false
+            }
+            "self.music.resume" -> {
+                (musicControl?.onResumeMusic() ?: "Music player unavailable") to false
             }
             else -> "Unknown tool: $name" to true
         }
