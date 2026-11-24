@@ -422,8 +422,6 @@ fun RobotFaceScreen(
 
     if (showSettings) {
         var draftOtaUrl by remember(state.otaUrl) { mutableStateOf(state.otaUrl) }
-        var draftUpdateUrl by remember(updateState.updateUrl) { mutableStateOf(updateState.updateUrl) }
-        var draftGuideUrl by remember(updateState.guideUrl) { mutableStateOf(updateState.guideUrl) }
 
         AlertDialog(
             onDismissRequest = { showSettings = false },
@@ -438,22 +436,7 @@ fun RobotFaceScreen(
                         label = { Text("OTA 服务器地址") },
                         singleLine = true
                     )
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = draftUpdateUrl,
-                        onValueChange = { draftUpdateUrl = it },
-                        label = { Text("更新地址 (version.json)") },
-                        placeholder = { Text("https://xxx.pages.dev/version.json") },
-                        singleLine = true
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = draftGuideUrl,
-                        onValueChange = { draftGuideUrl = it },
-                        label = { Text("使用指南地址 (可选)") },
-                        placeholder = { Text("https://xxx.pages.dev/guide.html") },
-                        singleLine = true
-                    )
+
                     Spacer(Modifier.height(8.dp))
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -462,7 +445,6 @@ fun RobotFaceScreen(
                         OutlinedButton(
                             enabled = !updateState.isChecking,
                             onClick = {
-                                onSaveUpdateUrl(draftUpdateUrl)
                                 onCheckUpdate()
                             }
                         ) {
@@ -518,12 +500,6 @@ fun RobotFaceScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    if (draftUpdateUrl.trim() != updateState.updateUrl) {
-                        onSaveUpdateUrl(draftUpdateUrl)
-                    }
-                    if (draftGuideUrl.trim() != updateState.guideUrl) {
-                        onSaveGuideUrl(draftGuideUrl)
-                    }
                     if (draftOtaUrl.trim() != state.otaUrl) {
                         onSaveOtaUrl(draftOtaUrl)
                     }
