@@ -89,7 +89,8 @@ fun RobotFaceScreen(
     onToggleHandsFreeWake: () -> Unit,
     onTogglePowerSaveMode: () -> Unit,
     onSelectWakeWord: (String) -> Unit,
-    onUpdatePromptKeywords: (String, String) -> Result<Unit>,
+    onPreviewPromptTokens: (String) -> String,
+    onUpdatePromptKeywords: (String, String, String, String) -> Result<Unit>,
     onSaveOtaUrl: (String) -> Unit,
     onSaveUpdateUrl: (String) -> Unit,
     onSaveGuideUrl: (String) -> Unit,
@@ -585,7 +586,17 @@ fun RobotFaceScreen(
 
     if (showPromptEditor) {
         var customWakeInput by remember(state.activeWakeWord) { mutableStateOf(state.activeWakeWord) }
+        var customWakeTokens by remember(state.activeWakeWord, state.activeWakeTokens) {
+            mutableStateOf(
+                state.activeWakeTokens.ifBlank { onPreviewPromptTokens(state.activeWakeWord) }
+            )
+        }
         var customExitInput by remember(state.activeExitWord) { mutableStateOf(state.activeExitWord) }
+        var customExitTokens by remember(state.activeExitWord, state.activeExitTokens) {
+            mutableStateOf(
+                state.activeExitTokens.ifBlank { onPreviewPromptTokens(state.activeExitWord) }
+            )
+        }
         var promptError by remember { mutableStateOf<String?>(null) }
 
         AlertDialog(
@@ -594,7 +605,7 @@ fun RobotFaceScreen(
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        text = "支持输入常用汉字自定义唤醒词与结束词，保存后立即生效。",
+                        text = "输入汉字会自动生成拼音；如遇多音字（如「仔」zǎi），可直接微调下方拼音。",
                         fontSize = 12.sp,
                         color = Color(0xFF8B949E)
                     )
@@ -603,10 +614,23 @@ fun RobotFaceScreen(
                         value = customWakeInput,
                         onValueChange = {
                             customWakeInput = it
+                            customWakeTokens = onPreviewPromptTokens(it)
                             promptError = null
                         },
-                        label = { Text("唤醒词（留空则监听全部预设）") },
-                        placeholder = { Text("例如：小智小智") },
+                        label = { Text("唤醒词（留空监听全部预设）") },
+                        placeholder = { Text("例如：蛋仔蛋仔") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = customWakeTokens,
+                        onValueChange = {
+                            customWakeTokens = it
+                            promptError = null
+                        },
+                        label = { Text("唤醒词拼音（声母韵母空格隔开）") },
+                        placeholder = { Text("例如：d àn z ǎi d àn z ǎi") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -615,6 +639,7 @@ fun RobotFaceScreen(
                         value = customExitInput,
                         onValueChange = {
                             customExitInput = it
+                            customExitTokens = onPreviewPromptTokens(it)
                             promptError = null
                         },
                         label = { Text("结束词") },
@@ -622,14 +647,18 @@ fun RobotFaceScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (state.wakeWordDebugInfo.isNotBlank()) {
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = "当前词条：${state.wakeWordDebugInfo}",
-                            fontSize = 11.sp,
-                            color = Color(0xFF8B949E)
-                        )
-                    }
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = customExitTokens,
+                        onValueChange = {
+                            customExitTokens = it
+                            promptError = null
+                        },
+                        label = { Text("结束词拼音（多音字可微调）") },
+                        placeholder = { Text("例如：x iǎo zh ì t uì x ià") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     promptError?.let { err ->
                         Spacer(Modifier.height(8.dp))
                         Text(err, fontSize = 12.sp, color = Color(0xFFFF7B72))
@@ -638,7 +667,12 @@ fun RobotFaceScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    onUpdatePromptKeywords(customWakeInput, customExitInput)
+                    onUpdatePromptKeywords(
+                        customWakeInput,
+                        customExitInput,
+                        customWakeTokens,
+                        customExitTokens
+                    )
                         .onSuccess { showPromptEditor = false }
                         .onFailure { err -> promptError = err.message ?: "保存失败" }
                 }) {
@@ -648,8 +682,12 @@ fun RobotFaceScreen(
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = {
-                        customWakeInput = state.availableWakeWords.firstOrNull() ?: "小智小智"
-                        customExitInput = "小智退下"
+                        val defWake = state.availableWakeWords.firstOrNull() ?: "小智小智"
+                        val defExit = "小智退下"
+                        customWakeInput = defWake
+                        customWakeTokens = onPreviewPromptTokens(defWake)
+                        customExitInput = defExit
+                        customExitTokens = onPreviewPromptTokens(defExit)
                         promptError = null
                     }) {
                         Text("恢复默认")

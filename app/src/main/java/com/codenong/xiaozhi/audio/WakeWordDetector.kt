@@ -25,7 +25,9 @@ class WakeWordDetector(
     private var exitSpotter: KeywordSpotter? = null
     private var exitStream: OnlineStream? = null
     private var activeWakeWordName: String? = null
+    private var activeWakeTokens: String? = null
     private var activeExitWordName: String = DEFAULT_EXIT_KEYWORD
+    private var activeExitTokens: String? = null
     private var floatBuffer: FloatArray = FloatArray(0)
 
     @Volatile
@@ -67,10 +69,14 @@ class WakeWordDetector(
     @Synchronized
     fun initialize(
         selectedWakeWord: String? = activeWakeWordName,
-        exitWord: String = activeExitWordName
+        exitWord: String = activeExitWordName,
+        wakeTokens: String? = activeWakeTokens,
+        exitTokens: String? = activeExitTokens
     ): Boolean {
         activeWakeWordName = selectedWakeWord
+        activeWakeTokens = wakeTokens?.trim()?.ifEmpty { null }
         activeExitWordName = exitWord.ifBlank { DEFAULT_EXIT_KEYWORD }
+        activeExitTokens = exitTokens?.trim()?.ifEmpty { null }
         if (isInitialized) return true
 
         return runCatching {
@@ -135,27 +141,59 @@ class WakeWordDetector(
         updateCustomKeywords(displayName, activeExitWordName)
     }
 
+    fun previewTokens(phrase: String): String {
+        val clean = phrase.trim()
+        if (clean.isEmpty()) return ""
+        val preset = loadEntriesFromAssets().firstOrNull { it.displayName == clean }
+        if (preset != null) {
+            val idx = preset.rawLine.indexOf(':')
+            if (idx > 0) return preset.rawLine.substring(0, idx).trim()
+        }
+        return pinyinConverter.phraseToTokens(clean).getOrDefault("")
+    }
+
     @Synchronized
-    fun updateCustomKeywords(wakeWord: String?, exitWord: String?): Result<Unit> {
+    fun updateCustomKeywords(
+        wakeWord: String?,
+        exitWord: String?,
+        wakeTokens: String? = null,
+        exitTokens: String? = null
+    ): Result<Unit> {
         val cleanWake = wakeWord?.trim().orEmpty()
         val cleanExit = exitWord?.trim().orEmpty().ifEmpty { DEFAULT_EXIT_KEYWORD }
+        val cleanWakeTokens = wakeTokens?.trim().orEmpty()
+        val cleanExitTokens = exitTokens?.trim().orEmpty()
 
         val wakeContent = if (cleanWake.isNotEmpty()) {
-            val preset = loadWakeWordEntries().firstOrNull { it.displayName == cleanWake }
-            preset?.rawLine ?: pinyinConverter.toKeywordLine(cleanWake, 1.8f, 0.20f).getOrElse {
-                return Result.failure(it)
+            if (cleanWakeTokens.isNotEmpty()) {
+                pinyinConverter.buildKeywordLineFromTokens(cleanWake, cleanWakeTokens, 1.8f, 0.20f).getOrElse {
+                    return Result.failure(it)
+                }
+            } else {
+                val preset = loadWakeWordEntries().firstOrNull { it.displayName == cleanWake }
+                preset?.rawLine ?: pinyinConverter.toKeywordLine(cleanWake, 1.8f, 0.20f).getOrElse {
+                    return Result.failure(it)
+                }
             }
         } else {
             loadWakeWordEntries().joinToString("\n") { it.rawLine }
         }
 
-        val exitPreset = loadEntriesFromAssets().firstOrNull { it.displayName == cleanExit }
-        val exitContent = exitPreset?.rawLine ?: pinyinConverter.toKeywordLine(cleanExit, 1.0f, 0.45f).getOrElse {
-            return Result.failure(it)
+        val exitContent = if (cleanExitTokens.isNotEmpty()) {
+            pinyinConverter.buildKeywordLineFromTokens(cleanExit, cleanExitTokens, 1.0f, 0.45f).getOrElse {
+                return Result.failure(it)
+            }
+        } else {
+            val exitPreset = loadEntriesFromAssets().firstOrNull { it.displayName == cleanExit }
+            exitPreset?.rawLine ?: pinyinConverter.toKeywordLine(cleanExit, 1.0f, 0.45f).getOrElse {
+                return Result.failure(it)
+            }
         }
 
         activeWakeWordName = cleanWake.ifEmpty { null }
+        activeWakeTokens = cleanWakeTokens.ifEmpty { null }
         activeExitWordName = cleanExit
+        activeExitTokens = cleanExitTokens.ifEmpty { null }
 
         if (!isInitialized) {
             return Result.success(Unit)
@@ -198,9 +236,13 @@ class WakeWordDetector(
     private fun buildWakeFileContent(selectedWakeWord: String?): String {
         val clean = selectedWakeWord?.trim().orEmpty()
         if (clean.isNotEmpty()) {
-            val preset = loadWakeWordEntries().firstOrNull { it.displayName == clean }
-            val line = preset?.rawLine
-                ?: pinyinConverter.toKeywordLine(clean, 1.8f, 0.20f).getOrNull()
+            val customTok = activeWakeTokens
+            val line = if (!customTok.isNullOrBlank()) {
+                pinyinConverter.buildKeywordLineFromTokens(clean, customTok, 1.8f, 0.20f).getOrNull()
+            } else {
+                val preset = loadWakeWordEntries().firstOrNull { it.displayName == clean }
+                preset?.rawLine ?: pinyinConverter.toKeywordLine(clean, 1.8f, 0.20f).getOrNull()
+            }
             if (line != null) return "$line\n"
         }
         return loadWakeWordEntries().joinToString("\n") { it.rawLine } + "\n"
@@ -208,10 +250,13 @@ class WakeWordDetector(
 
     private fun buildExitFileContent(exitWord: String): String {
         val target = exitWord.ifBlank { DEFAULT_EXIT_KEYWORD }
-        val preset = loadEntriesFromAssets().firstOrNull { it.displayName == target }
-        val line = preset?.rawLine
-            ?: pinyinConverter.toKeywordLine(target, 1.0f, 0.45f).getOrNull()
-            ?: "x iǎo zh ì t uì x ià :1.0 #0.45 @小智退下"
+        val customTok = activeExitTokens
+        val line = if (!customTok.isNullOrBlank()) {
+            pinyinConverter.buildKeywordLineFromTokens(target, customTok, 1.0f, 0.45f).getOrNull()
+        } else {
+            val preset = loadEntriesFromAssets().firstOrNull { it.displayName == target }
+            preset?.rawLine ?: pinyinConverter.toKeywordLine(target, 1.0f, 0.45f).getOrNull()
+        } ?: "x iǎo zh ì t uì x ià :1.0 #0.45 @小智退下"
         return "$line\n"
     }
 

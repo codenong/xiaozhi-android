@@ -18,7 +18,7 @@ class PinyinConverter(private val context: Context) {
         }.getOrDefault(emptySet())
     }
 
-    fun toKeywordLine(phrase: String, score: Float, threshold: Float): Result<String> {
+    fun phraseToTokens(phrase: String): Result<String> {
         val clean = phrase.replace(Regex("[\\s,，。！？!?\\u3000]+"), "")
         if (clean.isEmpty()) {
             return Result.failure(IllegalArgumentException("提示词不能为空"))
@@ -30,7 +30,24 @@ class PinyinConverter(private val context: Context) {
         val transliterator = Transliterator.getInstance("Han-Latin")
         val tokens = mutableListOf<String>()
 
-        for (ch in clean) {
+        var idx = 0
+        while (idx < clean.length) {
+            val matchedWord = POLYPHONE_WORDS.keys
+                .filter { clean.startsWith(it, startIndex = idx) }
+                .maxByOrNull { it.length }
+
+            if (matchedWord != null) {
+                val presetTokens = POLYPHONE_WORDS.getValue(matchedWord)
+                for (part in presetTokens) {
+                    val resolved = resolveValidToken(part)
+                        ?: return Result.failure(IllegalArgumentException("词库暂不支持音节（$part）"))
+                    tokens.add(resolved)
+                }
+                idx += matchedWord.length
+                continue
+            }
+
+            val ch = clean[idx]
             val rawSyl = transliterator.transliterate(ch.toString()).lowercase()
             val syllables = rawSyl.split(Regex("[^a-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]+"))
                 .filter { it.isNotBlank() }
@@ -47,14 +64,39 @@ class PinyinConverter(private val context: Context) {
                     tokens.add(resolved)
                 }
             }
+            idx++
         }
 
         if (tokens.isEmpty()) {
             return Result.failure(IllegalArgumentException("无法识别「$clean」的拼音"))
         }
-        val line = "${tokens.joinToString(" ")} :$score #$threshold @$clean"
+        return Result.success(tokens.joinToString(" "))
+    }
+
+    fun buildKeywordLineFromTokens(displayWord: String, tokensText: String, score: Float, threshold: Float): Result<String> {
+        val clean = displayWord.replace(Regex("[\\s,，。！？!?\\u3000]+"), "")
+        if (clean.isEmpty()) {
+            return Result.failure(IllegalArgumentException("提示词不能为空"))
+        }
+        val parts = tokensText.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (parts.isEmpty()) {
+            return Result.failure(IllegalArgumentException("拼音序列不能为空"))
+        }
+        val resolvedList = mutableListOf<String>()
+        for (part in parts) {
+            val resolved = resolveValidToken(part)
+                ?: return Result.failure(IllegalArgumentException("词库不支持拼音音节「$part」，请检查拼写与声调"))
+            resolvedList.add(resolved)
+        }
+        val line = "${resolvedList.joinToString(" ")} :$score #$threshold @$clean"
         Log.i("XiaozhiKWS", "PinyinConverter '$clean' -> '$line'")
         return Result.success(line)
+    }
+
+    fun toKeywordLine(phrase: String, score: Float, threshold: Float): Result<String> {
+        val tokensRes = phraseToTokens(phrase)
+        val tokens = tokensRes.getOrElse { return Result.failure(it) }
+        return buildKeywordLineFromTokens(phrase, tokens, score, threshold)
     }
 
     private fun resolveValidToken(token: String): String? {
@@ -80,5 +122,17 @@ class PinyinConverter(private val context: Context) {
             return listOf(first.toString(), syllable.substring(1))
         }
         return listOf(syllable)
+    }
+
+    companion object {
+        private val POLYPHONE_WORDS = mapOf(
+            "蛋仔" to listOf("d", "àn", "z", "ǎi"),
+            "仔仔" to listOf("z", "ǎi", "z", "ǎi"),
+            "音乐" to listOf("y", "īn", "y", "uè"),
+            "快乐" to listOf("k", "uài", "l", "è"),
+            "乐乐" to listOf("l", "è", "l", "è"),
+            "长大" to listOf("zh", "ǎng", "d", "à"),
+            "重庆" to listOf("ch", "óng", "q", "ìng")
+        )
     }
 }

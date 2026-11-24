@@ -46,6 +46,28 @@ class DeviceIdentityStore(context: Context) {
         }
     }
 
+    fun getCustomWakeTokens(): String = prefs.getString(KEY_CUSTOM_WAKE_TOKENS, "") ?: ""
+
+    fun setCustomWakeTokens(tokens: String?) {
+        val clean = tokens?.trim().orEmpty()
+        if (clean.isEmpty()) {
+            prefs.edit().remove(KEY_CUSTOM_WAKE_TOKENS).apply()
+        } else {
+            prefs.edit().putString(KEY_CUSTOM_WAKE_TOKENS, clean).apply()
+        }
+    }
+
+    fun getCustomExitTokens(): String = prefs.getString(KEY_CUSTOM_EXIT_TOKENS, "") ?: ""
+
+    fun setCustomExitTokens(tokens: String?) {
+        val clean = tokens?.trim().orEmpty()
+        if (clean.isEmpty()) {
+            prefs.edit().remove(KEY_CUSTOM_EXIT_TOKENS).apply()
+        } else {
+            prefs.edit().putString(KEY_CUSTOM_EXIT_TOKENS, clean).apply()
+        }
+    }
+
     fun getUpdateCheckUrl(): String = prefs.getString(KEY_UPDATE_URL, "") ?: ""
 
     fun setUpdateCheckUrl(url: String) {
@@ -90,6 +112,8 @@ class DeviceIdentityStore(context: Context) {
         private const val KEY_GUIDE_SEEN = "guide_seen"
         private const val KEY_POWER_SAVE_ENABLED = "power_save_enabled"
         private const val KEY_CUSTOM_EXIT_WORD = "custom_exit_word"
+        private const val KEY_CUSTOM_WAKE_TOKENS = "custom_wake_tokens"
+        private const val KEY_CUSTOM_EXIT_TOKENS = "custom_exit_tokens"
         const val DEFAULT_EXIT_WORD = "小智退下"
     }
 }

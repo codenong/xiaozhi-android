@@ -66,8 +66,13 @@ class AudioEngine(
     private var kwsActiveUntilMs: Long = 0L
     private val kwsPreRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES + 1)
 
-    fun startWakeWordDetection(selectedWakeWord: String? = null, exitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD) {
-        val ok = wakeWordDetector.initialize(selectedWakeWord, exitWord)
+    fun startWakeWordDetection(
+        selectedWakeWord: String? = null,
+        exitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD,
+        wakeTokens: String? = null,
+        exitTokens: String? = null
+    ) {
+        val ok = wakeWordDetector.initialize(selectedWakeWord, exitWord, wakeTokens, exitTokens)
         Log.i("XiaozhiKWS", "startWakeWordDetection(wake=$selectedWakeWord, exit=$exitWord, powerSave=$powerSaveEnabled) initOk=$ok")
         if (!ok) return
         wakeWordDetector.reset()
@@ -81,12 +86,24 @@ class AudioEngine(
         wakeWordDetector.setActiveWakeWord(selectedWakeWord)
     }
 
-    fun updateCustomKeywords(wakeWord: String?, exitWord: String?): Result<Unit> {
-        return wakeWordDetector.updateCustomKeywords(wakeWord, exitWord)
+    fun previewTokens(phrase: String): String = wakeWordDetector.previewTokens(phrase)
+
+    fun updateCustomKeywords(
+        wakeWord: String?,
+        exitWord: String?,
+        wakeTokens: String? = null,
+        exitTokens: String? = null
+    ): Result<Unit> {
+        return wakeWordDetector.updateCustomKeywords(wakeWord, exitWord, wakeTokens, exitTokens)
     }
 
-    fun startConversationCapture(selectedWakeWord: String? = null, exitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD) {
-        wakeWordDetector.initialize(selectedWakeWord, exitWord)
+    fun startConversationCapture(
+        selectedWakeWord: String? = null,
+        exitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD,
+        wakeTokens: String? = null,
+        exitTokens: String? = null
+    ) {
+        wakeWordDetector.initialize(selectedWakeWord, exitWord, wakeTokens, exitTokens)
         wakeWordDetector.reset()
         exitWordCooldownUntilMs = System.currentTimeMillis() + 800L
         captureMode = CaptureMode.CONVERSATION

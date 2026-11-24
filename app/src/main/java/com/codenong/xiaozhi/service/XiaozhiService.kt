@@ -64,7 +64,9 @@ data class XiaozhiUiState(
     val powerSaveEnabled: Boolean = false,
     val availableWakeWords: List<String> = emptyList(),
     val activeWakeWord: String = "",
+    val activeWakeTokens: String = "",
     val activeExitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD,
+    val activeExitTokens: String = "",
     val wakeWordDebugInfo: String = "",
     val errorMessage: String? = null,
     val brightnessPercent: Int? = null,
@@ -280,7 +282,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         val identity = identityStore.getIdentity()
         val entries = wakeWordDetector.loadWakeWordEntries().map { it.displayName }
         val savedWake = identityStore.getSelectedWakeWord()
+        val savedWakeTokens = identityStore.getCustomWakeTokens()
         val savedExit = identityStore.getCustomExitWord()
+        val savedExitTokens = identityStore.getCustomExitTokens()
         val effectiveWake = when {
             !savedWake.isNullOrBlank() -> savedWake
             savedWake == "" && entries.isNotEmpty() -> ""
@@ -294,7 +298,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 powerSaveEnabled = savedPowerSave,
                 availableWakeWords = entries,
                 activeWakeWord = effectiveWake,
-                activeExitWord = savedExit
+                activeWakeTokens = savedWakeTokens,
+                activeExitWord = savedExit,
+                activeExitTokens = savedExitTokens
             )
         }
         bootstrapOta()
@@ -737,19 +743,37 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
     }
 
-    fun updatePromptKeywords(wakeWord: String, exitWord: String): Result<Unit> {
+    fun previewPromptTokens(phrase: String): String = audioEngine.previewTokens(phrase)
+
+    fun updatePromptKeywords(
+        wakeWord: String,
+        exitWord: String,
+        wakeTokens: String = "",
+        exitTokens: String = ""
+    ): Result<Unit> {
         val cleanWake = wakeWord.trim()
         val cleanExit = exitWord.trim().ifEmpty { WakeWordDetector.DEFAULT_EXIT_KEYWORD }
-        val result = audioEngine.updateCustomKeywords(cleanWake.ifBlank { null }, cleanExit)
+        val cleanWakeTok = wakeTokens.trim()
+        val cleanExitTok = exitTokens.trim()
+        val result = audioEngine.updateCustomKeywords(
+            cleanWake.ifBlank { null },
+            cleanExit,
+            cleanWakeTok.ifBlank { null },
+            cleanExitTok.ifBlank { null }
+        )
         if (result.isSuccess) {
             identityStore.setSelectedWakeWord(cleanWake)
+            identityStore.setCustomWakeTokens(cleanWakeTok)
             identityStore.setCustomExitWord(cleanExit)
+            identityStore.setCustomExitTokens(cleanExitTok)
             val debugStr = wakeWordDetector.lastError?.let { "异常：$it" }
                 ?: wakeWordDetector.activeWakeLinePreview
             _uiState.update { state ->
                 state.copy(
                     activeWakeWord = cleanWake,
+                    activeWakeTokens = cleanWakeTok,
                     activeExitWord = cleanExit,
+                    activeExitTokens = cleanExitTok,
                     wakeWordDebugInfo = debugStr,
                     subtitle = if (state.deviceState == DeviceState.IDLE) {
                         idleHint(state.handsFreeWakeEnabled, cleanWake)
@@ -781,7 +805,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             val active = _uiState.value.activeWakeWord.ifBlank { null }
             val exitWord = _uiState.value.activeExitWord
             audioEngine.exitWordEnabled = _uiState.value.deviceState == DeviceState.SPEAKING
-            audioEngine.startWakeWordDetection(active, exitWord)
+            audioEngine.startWakeWordDetection(
+                active,
+                exitWord,
+                _uiState.value.activeWakeTokens.ifBlank { null },
+                _uiState.value.activeExitTokens.ifBlank { null }
+            )
             val debugStr = wakeWordDetector.lastError?.let { "唤醒引擎异常：$it" }
                 ?: wakeWordDetector.activeWakeLinePreview
             _uiState.update { state ->
@@ -855,7 +884,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         wsClient.sendStartListening(mode)
         audioEngine.startConversationCapture(
             _uiState.value.activeWakeWord.ifBlank { null },
-            _uiState.value.activeExitWord
+            _uiState.value.activeExitWord,
+            _uiState.value.activeWakeTokens.ifBlank { null },
+            _uiState.value.activeExitTokens.ifBlank { null }
         )
     }
 

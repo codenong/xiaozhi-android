@@ -115,8 +115,16 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     fun toggleHandsFreeWake() = service?.toggleHandsFreeWake()
     fun togglePowerSaveMode() = service?.togglePowerSaveMode()
     fun selectWakeWord(wakeWord: String) = service?.selectWakeWord(wakeWord)
-    fun updatePromptKeywords(wakeWord: String, exitWord: String): Result<Unit> =
-        service?.updatePromptKeywords(wakeWord, exitWord)
+    fun previewPromptTokens(phrase: String): String =
+        service?.previewPromptTokens(phrase) ?: ""
+
+    fun updatePromptKeywords(
+        wakeWord: String,
+        exitWord: String,
+        wakeTokens: String = "",
+        exitTokens: String = ""
+    ): Result<Unit> =
+        service?.updatePromptKeywords(wakeWord, exitWord, wakeTokens, exitTokens)
             ?: Result.failure(IllegalStateException("语音服务尚未就绪"))
     fun updateOtaUrl(newUrl: String) = service?.updateOtaUrl(newUrl)
 
