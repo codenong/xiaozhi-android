@@ -65,6 +65,7 @@ data class XiaozhiUiState(
     val availableWakeWords: List<String> = emptyList(),
     val activeWakeWord: String = "",
     val activeExitWord: String = WakeWordDetector.DEFAULT_EXIT_KEYWORD,
+    val wakeWordDebugInfo: String = "",
     val errorMessage: String? = null,
     val brightnessPercent: Int? = null,
     val musicTitle: String? = null,
@@ -743,10 +744,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         if (result.isSuccess) {
             identityStore.setSelectedWakeWord(cleanWake)
             identityStore.setCustomExitWord(cleanExit)
+            val debugStr = wakeWordDetector.lastError?.let { "异常：$it" }
+                ?: wakeWordDetector.activeWakeLinePreview
             _uiState.update { state ->
                 state.copy(
                     activeWakeWord = cleanWake,
                     activeExitWord = cleanExit,
+                    wakeWordDebugInfo = debugStr,
                     subtitle = if (state.deviceState == DeviceState.IDLE) {
                         idleHint(state.handsFreeWakeEnabled, cleanWake)
                     } else {
@@ -778,6 +782,14 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             val exitWord = _uiState.value.activeExitWord
             audioEngine.exitWordEnabled = _uiState.value.deviceState == DeviceState.SPEAKING
             audioEngine.startWakeWordDetection(active, exitWord)
+            val debugStr = wakeWordDetector.lastError?.let { "唤醒引擎异常：$it" }
+                ?: wakeWordDetector.activeWakeLinePreview
+            _uiState.update { state ->
+                state.copy(
+                    wakeWordDebugInfo = debugStr,
+                    errorMessage = wakeWordDetector.lastError?.let { "离线唤醒异常：$it" } ?: state.errorMessage
+                )
+            }
             updateNotification("锁屏待机中 · 喊「${active ?: "唤醒词"}」开始对话")
         }
     }

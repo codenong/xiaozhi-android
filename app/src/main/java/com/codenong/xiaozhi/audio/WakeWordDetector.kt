@@ -32,6 +32,14 @@ class WakeWordDetector(
     var isInitialized: Boolean = false
         private set
 
+    @Volatile
+    var lastError: String? = null
+        private set
+
+    @Volatile
+    var activeWakeLinePreview: String = ""
+        private set
+
     fun isModelAvailable(): Boolean = true
 
     fun loadWakeWordEntries(): List<WakeWordEntry> =
@@ -70,8 +78,11 @@ class WakeWordDetector(
             val wakeFile = File(kwsDir, "active_wake.txt")
             val exitFile = File(kwsDir, "active_exit.txt")
 
-            wakeFile.writeText(buildWakeFileContent(selectedWakeWord), Charsets.UTF_8)
-            exitFile.writeText(buildExitFileContent(activeExitWordName), Charsets.UTF_8)
+            val wakeContent = buildWakeFileContent(selectedWakeWord)
+            val exitContent = buildExitFileContent(activeExitWordName)
+            activeWakeLinePreview = wakeContent.trim()
+            wakeFile.writeText(wakeContent, Charsets.UTF_8)
+            exitFile.writeText(exitContent, Charsets.UTF_8)
 
             val newWakeSpotter = buildSpotter(kwsDir, wakeFile)
             val newWakeStream = newWakeSpotter.createStream()
@@ -82,11 +93,39 @@ class WakeWordDetector(
             stream = newWakeStream
             exitSpotter = newExitSpotter
             exitStream = newExitStream
+            lastError = null
             isInitialized = true
             true
         }.onFailure { err ->
+            lastError = err.message ?: err.javaClass.simpleName
             Log.e(TAG, "Failed to initialize Sherpa-ONNX KWS: ${err.message}", err)
-        }.getOrDefault(false)
+            // Fallback to bundled assets if filesystem spotter failed
+            runCatching {
+                val transducer = OnlineTransducerModelConfig(
+                    encoder = "kws/encoder.onnx",
+                    decoder = "kws/decoder.onnx",
+                    joiner = "kws/joiner.onnx"
+                )
+                val modelConfig = OnlineModelConfig(
+                    transducer = transducer,
+                    tokens = "kws/tokens.txt",
+                    numThreads = 1,
+                    debug = false,
+                    modelType = "zipformer2"
+                )
+                val config = KeywordSpotterConfig(
+                    featConfig = FeatureConfig(sampleRate = sampleRate, featureDim = 80),
+                    modelConfig = modelConfig,
+                    keywordsFile = "kws/keywords.txt"
+                )
+                val kws = KeywordSpotter(assetManager = context.assets, config = config)
+                spotter = kws
+                stream = kws.createStream()
+                exitSpotter = kws
+                exitStream = kws.createStream()
+                isInitialized = true
+            }
+        }.getOrDefault(isInitialized)
     }
 
     @Synchronized
@@ -101,7 +140,7 @@ class WakeWordDetector(
 
         val wakeContent = if (cleanWake.isNotEmpty()) {
             val preset = loadWakeWordEntries().firstOrNull { it.displayName == cleanWake }
-            preset?.rawLine ?: pinyinConverter.toKeywordLine(cleanWake, 1.5f, 0.25f).getOrElse {
+            preset?.rawLine ?: pinyinConverter.toKeywordLine(cleanWake, 1.8f, 0.20f).getOrElse {
                 return Result.failure(it)
             }
         } else {
@@ -137,6 +176,8 @@ class WakeWordDetector(
             val oldExitStream = exitStream
             val oldExitSpotter = exitSpotter
 
+            activeWakeLinePreview = wakeContent.trim()
+            lastError = null
             spotter = newWakeSpotter
             stream = newWakeStream
             exitSpotter = newExitSpotter
@@ -155,7 +196,7 @@ class WakeWordDetector(
         if (clean.isNotEmpty()) {
             val preset = loadWakeWordEntries().firstOrNull { it.displayName == clean }
             val line = preset?.rawLine
-                ?: pinyinConverter.toKeywordLine(clean, 1.5f, 0.25f).getOrNull()
+                ?: pinyinConverter.toKeywordLine(clean, 1.8f, 0.20f).getOrNull()
             if (line != null) return "$line\n"
         }
         return loadWakeWordEntries().joinToString("\n") { it.rawLine } + "\n"

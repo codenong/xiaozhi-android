@@ -622,6 +622,14 @@ fun RobotFaceScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (state.wakeWordDebugInfo.isNotBlank()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = "当前词条：${state.wakeWordDebugInfo}",
+                            fontSize = 11.sp,
+                            color = Color(0xFF8B949E)
+                        )
+                    }
                     promptError?.let { err ->
                         Spacer(Modifier.height(8.dp))
                         Text(err, fontSize = 12.sp, color = Color(0xFFFF7B72))
