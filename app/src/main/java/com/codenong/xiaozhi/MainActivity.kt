@@ -78,6 +78,10 @@ class MainActivity : ComponentActivity() {
                 onTapFace = { viewModel.onFaceTapped() },
                 onEndConversation = { viewModel.endConversation() },
                 onStopMusic = { viewModel.stopMusic() },
+                onExitApp = {
+                    viewModel.shutdownApp()
+                    finishAndRemoveTask()
+                },
                 onToggleAutoContinue = { viewModel.toggleAutoContinue() },
                 onToggleHandsFreeWake = { viewModel.toggleHandsFreeWake() },
                 onSelectWakeWord = { viewModel.selectWakeWord(it) },

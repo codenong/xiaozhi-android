@@ -98,6 +98,17 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     fun onFaceTapped() = service?.onFaceTapped()
     fun endConversation() = service?.endConversation()
     fun stopMusic() = service?.stopMusic()
+
+    fun shutdownApp() {
+        service?.shutdownService()
+        val ctx = getApplication<Application>()
+        if (bound) {
+            runCatching { ctx.unbindService(connection) }
+            bound = false
+        }
+        runCatching { ctx.stopService(Intent(ctx, XiaozhiService::class.java)) }
+        service = null
+    }
     fun toggleAutoContinue() = service?.toggleAutoContinue()
     fun toggleHandsFreeWake() = service?.toggleHandsFreeWake()
     fun selectWakeWord(wakeWord: String) = service?.selectWakeWord(wakeWord)

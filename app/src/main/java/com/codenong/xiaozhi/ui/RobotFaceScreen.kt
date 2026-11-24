@@ -84,6 +84,7 @@ fun RobotFaceScreen(
     onTapFace: () -> Unit,
     onEndConversation: () -> Unit,
     onStopMusic: () -> Unit,
+    onExitApp: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onToggleHandsFreeWake: () -> Unit,
     onSelectWakeWord: (String) -> Unit,
@@ -146,10 +147,16 @@ fun RobotFaceScreen(
             Text(
                 text = "小智 AI · ${state.deviceState.name} · 唤醒词: $activeWakeLabel",
                 color = Color(0xFF8B949E),
-                fontSize = 14.sp
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f)
             )
-            TextButton(onClick = { showSettings = true }) {
-                Text("高级设置", color = Color(0xFF58A6FF))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { showSettings = true }) {
+                    Text("高级设置", color = Color(0xFF58A6FF))
+                }
+                TextButton(onClick = onExitApp) {
+                    Text("退出", color = Color(0xFFFF7B72))
+                }
             }
         }
 

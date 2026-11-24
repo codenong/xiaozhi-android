@@ -339,6 +339,20 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         musicPlayer.stop()
     }
 
+    fun shutdownService() {
+        isUserDisconnecting = true
+        deferredMusicJob?.cancel()
+        activationJob?.cancel()
+        runCatching { wsClient.sendAbort("app_exit") }
+        runCatching { wsClient.sendStopListening() }
+        wsClient.disconnect()
+        musicPlayer.release()
+        audioEngine.release()
+        releaseAllLocks()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     fun endConversation() {
         when (_uiState.value.deviceState) {
             DeviceState.CONNECTING,
