@@ -931,7 +931,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             return
         }
         pendingWakeKeyword?.let { kw ->
-            wsClient.sendWakeWordDetected(kw)
+            val serverWakeWord = if (kw in _uiState.value.availableWakeWords) kw else "你好小智"
+            wsClient.sendWakeWordDetected(serverWakeWord)
             pendingWakeKeyword = null
         }
         startListeningInternal()
