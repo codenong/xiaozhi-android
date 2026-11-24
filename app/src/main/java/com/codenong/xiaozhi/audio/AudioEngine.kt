@@ -12,7 +12,6 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.util.Log
 import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.NoiseSuppressor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +42,6 @@ class AudioEngine(
     private var aec: AcousticEchoCanceler? = null
     private var ns: NoiseSuppressor? = null
     private var audioTrack: AudioTrack? = null
-    private var loudnessEnhancer: LoudnessEnhancer? = null
 
     private var recordJob: Job? = null
     private var playJob: Job? = null
@@ -271,13 +269,6 @@ class AudioEngine(
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        runCatching {
-            loudnessEnhancer = LoudnessEnhancer(track.audioSessionId).apply {
-                setTargetGain(800) // +8 dB，自带系统防破音限幅
-                enabled = true
-            }
-        }
-
         audioTrack = track
         track.play()
 
@@ -362,11 +353,9 @@ class AudioEngine(
         playJob?.cancel()
         playQueue.clear()
         runCatching {
-            loudnessEnhancer?.release()
             audioTrack?.stop()
             audioTrack?.release()
         }
-        loudnessEnhancer = null
         audioTrack = null
     }
 
