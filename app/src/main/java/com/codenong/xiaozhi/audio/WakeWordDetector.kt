@@ -86,8 +86,6 @@ class WakeWordDetector(
             wakeFile.writeText(wakeContent, Charsets.UTF_8)
             exitFile.writeText(exitContent, Charsets.UTF_8)
 
-            Log.i(TAG, "updateCustomKeywords() wake='$cleanWake' -> ${wakeContent.trim()}")
-            Log.i(TAG, "updateCustomKeywords() exit='$cleanExit' -> ${exitContent.trim()}")
             val newWakeSpotter = buildSpotter(kwsDir, wakeFile)
             val newWakeStream = newWakeSpotter.createStream()
             val newExitSpotter = buildSpotter(kwsDir, exitFile)
@@ -167,6 +165,8 @@ class WakeWordDetector(
             val kwsDir = ensureModelFilesExtracted()
             val wakeFile = File(kwsDir, "active_wake.txt")
             val exitFile = File(kwsDir, "active_exit.txt")
+            Log.i(TAG, "updateCustomKeywords() wake='$cleanWake' -> ${wakeContent.trim()}")
+            Log.i(TAG, "updateCustomKeywords() exit='$cleanExit' -> ${exitContent.trim()}")
             wakeFile.writeText(wakeContent + "\n", Charsets.UTF_8)
             exitFile.writeText(exitContent + "\n", Charsets.UTF_8)
 
