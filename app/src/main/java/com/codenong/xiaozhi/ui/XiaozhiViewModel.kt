@@ -99,6 +99,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     fun endConversation() = service?.endConversation()
     fun stopMusic() = service?.stopMusic()
     fun toggleMusicPlayback() = service?.toggleMusicPlayback()
+    fun dismissReminder() = service?.dismissReminder()
 
     fun shutdownApp() {
         service?.shutdownService()

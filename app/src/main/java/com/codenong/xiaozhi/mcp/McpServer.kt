@@ -20,11 +20,19 @@ interface PhoneControlListener {
     fun onSearchContact(name: String): String
 }
 
+interface ReminderControlListener {
+    fun onGetCurrentTime(): String
+    fun onCreateReminder(message: String, delaySeconds: Long?, triggerAt: String?): Pair<String, Boolean>
+    fun onListReminders(): String
+    fun onCancelReminder(id: Int?, keyword: String?): String
+}
+
 class McpServer(
     private val context: Context,
     private val onBrightnessRequest: (Int) -> Unit,
     private val musicControl: MusicControlListener? = null,
-    private val phoneControl: PhoneControlListener? = null
+    private val phoneControl: PhoneControlListener? = null,
+    private val reminderControl: ReminderControlListener? = null
 ) {
     fun handleRequest(payload: JSONObject): JSONObject? {
         val id = payload.opt("id")
@@ -150,6 +158,49 @@ class McpServer(
                 }),
                 required = listOf("name")
             ))
+            put(toolSchema(
+                name = "self.reminder.get_current_time",
+                description = "Get the current local date, time, weekday, and timezone on the Android device. Always call this before scheduling relative/tomorrow/clock reminders if you need the current date/time.",
+                properties = JSONObject()
+            ))
+            put(toolSchema(
+                name = "self.reminder.create",
+                description = "Schedule an alarm/timer reminder on the Android device. For 'N minutes later', pass delay_seconds. For clock times like '14:20' or 'tomorrow 9am', pass trigger_at in 'yyyy-MM-dd HH:mm' (recommended after get_current_time) or 'HH:mm'.",
+                properties = JSONObject().apply {
+                    put("message", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "What to remind the user to do")
+                    })
+                    put("delay_seconds", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "Relative delay in seconds from now (e.g. 600 for 10 minutes)")
+                    })
+                    put("trigger_at", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Target local time in 'yyyy-MM-dd HH:mm' or 'HH:mm' format")
+                    })
+                },
+                required = listOf("message")
+            ))
+            put(toolSchema(
+                name = "self.reminder.list",
+                description = "List all pending reminders scheduled on the device.",
+                properties = JSONObject()
+            ))
+            put(toolSchema(
+                name = "self.reminder.cancel",
+                description = "Cancel pending reminder(s) by numeric id or keyword.",
+                properties = JSONObject().apply {
+                    put("id", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "Optional reminder ID")
+                    })
+                    put("keyword", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Optional keyword matching reminder message")
+                    })
+                }
+            ))
         }
 
         val result = JSONObject().apply {
@@ -213,6 +264,32 @@ class McpServer(
                 } else {
                     (phoneControl?.onSearchContact(contactName) ?: "Phone control unavailable") to false
                 }
+            }
+            "self.reminder.get_current_time" -> {
+                (reminderControl?.onGetCurrentTime() ?: "Reminder unavailable") to false
+            }
+            "self.reminder.create" -> {
+                val message = args.optString("message", "").trim()
+                val delaySec = if (args.has("delay_seconds") && !args.isNull("delay_seconds")) {
+                    args.optLong("delay_seconds", -1L).takeIf { it > 0 }
+                } else {
+                    null
+                }
+                val triggerAt = args.optString("trigger_at", "").trim().ifEmpty { null }
+                reminderControl?.onCreateReminder(message, delaySec, triggerAt)
+                    ?: ("Reminder unavailable" to true)
+            }
+            "self.reminder.list" -> {
+                (reminderControl?.onListReminders() ?: "Reminder unavailable") to false
+            }
+            "self.reminder.cancel" -> {
+                val remId = if (args.has("id") && !args.isNull("id")) {
+                    args.optInt("id", -1).takeIf { it > 0 }
+                } else {
+                    null
+                }
+                val kw = args.optString("keyword", "").trim().ifEmpty { null }
+                (reminderControl?.onCancelReminder(remId, kw) ?: "Reminder unavailable") to false
             }
             else -> "Unknown tool: $name" to true
         }

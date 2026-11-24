@@ -16,6 +16,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.speech.tts.TextToSpeech
 import com.codenong.xiaozhi.MainActivity
 import com.codenong.xiaozhi.audio.AudioEngine
 import com.codenong.xiaozhi.audio.MusicPlayer
@@ -26,7 +27,10 @@ import com.codenong.xiaozhi.mcp.McpServer
 import com.codenong.xiaozhi.mcp.MusicControlListener
 import com.codenong.xiaozhi.mcp.PhoneControlListener
 import com.codenong.xiaozhi.phone.CallPrepareResult
+import com.codenong.xiaozhi.mcp.ReminderControlListener
 import com.codenong.xiaozhi.phone.PhoneCallManager
+import com.codenong.xiaozhi.reminder.ReminderManager
+import java.util.Locale
 import com.codenong.xiaozhi.model.ActivationInfo
 import com.codenong.xiaozhi.model.DeviceState
 import com.codenong.xiaozhi.model.WebSocketConfig
@@ -63,7 +67,8 @@ data class XiaozhiUiState(
     val errorMessage: String? = null,
     val brightnessPercent: Int? = null,
     val musicTitle: String? = null,
-    val isMusicPlaying: Boolean = false
+    val isMusicPlaying: Boolean = false,
+    val activeReminderMessage: String? = null
 )
 
 class XiaozhiService : Service(), XiaozhiSocketListener {
@@ -84,6 +89,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private lateinit var audioEngine: AudioEngine
     private lateinit var musicPlayer: MusicPlayer
     private lateinit var phoneCallManager: PhoneCallManager
+    private lateinit var reminderManager: ReminderManager
+    private var reminderTts: TextToSpeech? = null
+    private var reminderTtsReady: Boolean = false
     private var deferredMusicJob: Job? = null
     private var deferredCallJob: Job? = null
 
@@ -125,6 +133,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             }
         }
         phoneCallManager.startMonitoring()
+        reminderManager = ReminderManager(applicationContext)
+        reminderManager.rescheduleAll()
         mcpServer = McpServer(
             context = applicationContext,
             onBrightnessRequest = { brightness ->
@@ -186,6 +196,45 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                         list.joinToString("；") { "${it.name}: ${it.number}" }
                     }
                 }
+            },
+            reminderControl = object : ReminderControlListener {
+                override fun onGetCurrentTime(): String = reminderManager.getCurrentTimeJson()
+
+                override fun onCreateReminder(
+                    message: String,
+                    delaySeconds: Long?,
+                    triggerAt: String?
+                ): Pair<String, Boolean> {
+                    return reminderManager.createReminder(message, delaySeconds, triggerAt).fold(
+                        onSuccess = { item ->
+                            val timeStr = reminderManager.formatTriggerTime(item.triggerAtMs)
+                            "已设置提醒（ID:${item.id}）：将在 $timeStr 提醒「${item.message}」。请立即用语音明确告知用户已设好该提醒的时间和内容。" to false
+                        },
+                        onFailure = { err ->
+                            (err.message ?: "设置提醒失败") to true
+                        }
+                    )
+                }
+
+                override fun onListReminders(): String {
+                    val items = reminderManager.listReminders()
+                    return if (items.isEmpty()) {
+                        "当前没有待触发的提醒"
+                    } else {
+                        items.joinToString("；") {
+                            "ID ${it.id}（${reminderManager.formatTriggerTime(it.triggerAtMs)}）：${it.message}"
+                        }
+                    }
+                }
+
+                override fun onCancelReminder(id: Int?, keyword: String?): String {
+                    val removed = reminderManager.cancelReminder(id, keyword)
+                    return if (removed.isEmpty()) {
+                        "未找到匹配的待触发提醒"
+                    } else {
+                        "已取消 ${removed.size} 条提醒：" + removed.joinToString("、") { it.message }
+                    }
+                }
             }
         )
         wsClient = XiaozhiWebSocketClient(this)
@@ -242,6 +291,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TRIGGER_REMINDER) {
+            val reminderId = intent.getIntExtra(ReminderManager.EXTRA_REMINDER_ID, -1)
+            val message = intent.getStringExtra(ReminderManager.EXTRA_REMINDER_MESSAGE).orEmpty()
+            if (message.isNotBlank()) {
+                handleReminderFired(reminderId, message)
+            }
+        }
         return START_STICKY
     }
 
@@ -342,6 +398,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun playMusicFromMcp(url: String, title: String?) {
+        runCatching {
+            reminderTts?.stop()
+            reminderTts?.shutdown()
+        }
+        reminderTts = null
+        reminderTtsReady = false
         deferredMusicJob?.cancel()
         val shouldDefer = _uiState.value.deviceState != DeviceState.IDLE
         musicPlayer.play(url, title, deferStart = shouldDefer)
@@ -391,6 +453,39 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     fun stopMusic() {
         deferredMusicJob?.cancel()
         musicPlayer.stop()
+    }
+
+    fun dismissReminder() {
+        runCatching { reminderTts?.stop() }
+        _uiState.update { it.copy(activeReminderMessage = null) }
+    }
+
+    private fun handleReminderFired(reminderId: Int, message: String) {
+        if (reminderId > 0) {
+            reminderManager.markTriggered(reminderId)
+        }
+        if (musicPlayer.isActive()) {
+            musicPlayer.pause()
+        }
+        _uiState.update { it.copy(activeReminderMessage = message) }
+        updateNotification("⏰ 提醒：$message")
+        speakReminderText("时间到了，提醒你：$message。时间到了，提醒你：$message")
+    }
+
+    private fun speakReminderText(text: String) {
+        if (reminderTts == null) {
+            reminderTts = TextToSpeech(applicationContext) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    reminderTtsReady = true
+                    reminderTts?.language = Locale.SIMPLIFIED_CHINESE
+                    reminderTts?.setSpeechRate(0.85f)
+                    reminderTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "xiaozhi_reminder")
+                }
+            }
+        } else if (reminderTtsReady) {
+            reminderTts?.setSpeechRate(0.85f)
+            reminderTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "xiaozhi_reminder")
+        }
     }
 
     private fun scheduleDeferredPhoneCall() {
@@ -938,6 +1033,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         networkCallback?.let { cb ->
             runCatching { connectivityManager?.unregisterNetworkCallback(cb) }
         }
+        runCatching {
+            reminderTts?.stop()
+            reminderTts?.shutdown()
+        }
+        reminderTts = null
+        reminderTtsReady = false
         batteryAlertMonitor.stop()
         activationJob?.cancel()
         wsClient.disconnect()
@@ -951,6 +1052,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     companion object {
+        const val ACTION_TRIGGER_REMINDER = "com.codenong.xiaozhi.TRIGGER_REMINDER"
         private const val CHANNEL_ID = "xiaozhi_voice_channel"
         private const val NOTIFICATION_ID = 1001
     }

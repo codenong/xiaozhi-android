@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
                 onTapFace = { viewModel.onFaceTapped() },
                 onEndConversation = { viewModel.endConversation() },
                 onToggleMusicPlayback = { viewModel.toggleMusicPlayback() },
+                onDismissReminder = { viewModel.dismissReminder() },
                 onExitApp = {
                     viewModel.shutdownApp()
                     finishAndRemoveTask()

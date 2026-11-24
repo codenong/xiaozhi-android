@@ -84,6 +84,7 @@ fun RobotFaceScreen(
     onTapFace: () -> Unit,
     onEndConversation: () -> Unit,
     onToggleMusicPlayback: () -> Unit,
+    onDismissReminder: () -> Unit,
     onExitApp: () -> Unit,
     onToggleAutoContinue: () -> Unit,
     onToggleHandsFreeWake: () -> Unit,
@@ -324,6 +325,31 @@ fun RobotFaceScreen(
                             )
                         ) {
                             Text("结束对话")
+                        }
+                    }
+                    state.activeReminderMessage?.let { reminderText ->
+                        Spacer(Modifier.height(16.dp))
+                        Card(
+                            modifier = Modifier.widthIn(max = 420.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2111)),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "⏰ 提醒：$reminderText",
+                                    color = Color(0xFFF0883E),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Button(onClick = onDismissReminder) {
+                                    Text("知道了")
+                                }
+                            }
                         }
                     }
                     state.musicTitle?.let { title ->
