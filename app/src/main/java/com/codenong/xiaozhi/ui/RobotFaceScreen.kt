@@ -36,7 +36,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -424,7 +423,6 @@ fun RobotFaceScreen(
         var draftOtaUrl by remember(state.otaUrl) { mutableStateOf(state.otaUrl) }
         var draftUpdateUrl by remember(updateState.updateUrl) { mutableStateOf(updateState.updateUrl) }
         var draftGuideUrl by remember(updateState.guideUrl) { mutableStateOf(updateState.guideUrl) }
-        var draftWakeWord by remember(state.activeWakeWord) { mutableStateOf(state.activeWakeWord) }
 
         AlertDialog(
             onDismissRequest = { showSettings = false },
@@ -482,34 +480,12 @@ fun RobotFaceScreen(
                             showSettings = false
                             showPromptEditor = true
                         }) {
-                            Text("提示词修改")
+                            Text("提示词：${state.activeWakeWord.ifBlank { "全部" }}")
                         }
                     }
                     updateState.statusMessage?.let { msg ->
                         Spacer(Modifier.height(6.dp))
                         Text(msg, fontSize = 12.sp, color = Color(0xFF58A6FF))
-                    }
-                    if (state.availableWakeWords.isNotEmpty()) {
-                        Spacer(Modifier.height(16.dp))
-                        Text("选择唤醒词（来自 keywords.txt）", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            state.availableWakeWords.forEach { word ->
-                                FilterChip(
-                                    selected = draftWakeWord == word,
-                                    onClick = { draftWakeWord = word },
-                                    label = { Text(word) }
-                                )
-                            }
-                            FilterChip(
-                                selected = draftWakeWord.isEmpty(),
-                                onClick = { draftWakeWord = "" },
-                                label = { Text("全部") }
-                            )
-                        }
                     }
                     Spacer(Modifier.height(16.dp))
                     Card(
@@ -541,9 +517,6 @@ fun RobotFaceScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    if (draftWakeWord != state.activeWakeWord) {
-                        onSelectWakeWord(draftWakeWord)
-                    }
                     if (draftUpdateUrl.trim() != updateState.updateUrl) {
                         onSaveUpdateUrl(draftUpdateUrl)
                     }

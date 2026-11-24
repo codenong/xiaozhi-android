@@ -23,30 +23,33 @@ class PinyinConverter(private val context: Context) {
             return Result.failure(IllegalArgumentException("提示词不能为空"))
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            return Result.failure(IllegalArgumentException("当前系统版本低于 Android 10，暂不支持在线生成自定义拼音提示词"))
+            return Result.failure(IllegalArgumentException("当前系统版本低于 Android 10，暂不支持生成自定义拼音提示词"))
         }
 
         val transliterator = Transliterator.getInstance("Han-Latin")
-        val rawLatin = transliterator.transliterate(clean).lowercase()
-        val syllables = rawLatin.split(Regex("[^a-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]+"))
-            .filter { it.isNotBlank() }
+        val tokens = mutableListOf<String>()
 
-        if (syllables.isEmpty()) {
-            return Result.failure(IllegalArgumentException("无法识别「$clean」的拼音，请输入常用汉字"))
+        for (ch in clean) {
+            val rawSyl = transliterator.transliterate(ch.toString()).lowercase()
+            val syllables = rawSyl.split(Regex("[^a-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]+"))
+                .filter { it.isNotBlank() }
+            if (syllables.isEmpty()) {
+                return Result.failure(IllegalArgumentException("无法识别「$ch」的拼音，请输入常用汉字"))
+            }
+            for (syl in syllables) {
+                val parts = splitSyllableToPartialPinyin(syl)
+                for (part in parts) {
+                    val resolved = resolveValidToken(part)
+                        ?: return Result.failure(
+                            IllegalArgumentException("词库暂不支持「$ch」的音节（$part），请换一个常用字试试")
+                        )
+                    tokens.add(resolved)
+                }
+            }
         }
 
-        val tokens = mutableListOf<String>()
-        for (syl in syllables) {
-            val parts = splitSyllableToPartialPinyin(syl)
-            for (part in parts) {
-                val resolved = resolveValidToken(part)
-                if (resolved == null) {
-                    return Result.failure(
-                        IllegalArgumentException("词库暂不支持音节「$syl」（$part），请换一个常用词试试")
-                    )
-                }
-                tokens.add(resolved)
-            }
+        if (tokens.isEmpty()) {
+            return Result.failure(IllegalArgumentException("无法识别「$clean」的拼音"))
         }
         return Result.success("${tokens.joinToString(" ")} :$score #$threshold @$clean")
     }
