@@ -1,6 +1,7 @@
 package com.codenong.xiaozhi.ui
 
 import android.app.Application
+import android.util.Log
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -56,7 +57,12 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     private var bound = false
 
     init {
-        if (_updateState.value.updateUrl.isNotBlank()) {
+        val state = _updateState.value
+        Log.d(
+            TAG_UPDATE,
+            "init updateUrl='${state.updateUrl}', guideUrl='${state.guideUrl}', currentVersion=${state.currentVersionName}(${appUpdater.getCurrentVersionCode()})"
+        )
+        if (state.updateUrl.isNotBlank()) {
             checkForUpdate(silent = true)
         }
     }
@@ -161,17 +167,21 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun checkForUpdate(silent: Boolean = false) {
-        val url = _updateState.value.updateUrl
+        val storeUrl = identityStore.getUpdateCheckUrl()
+        val url = _updateState.value.updateUrl.ifBlank { storeUrl }
+        Log.d(TAG_UPDATE, "checkForUpdate(silent=$silent): stateUrl='${_updateState.value.updateUrl}', storeUrl='$storeUrl', resolved='$url'")
         if (url.isBlank()) {
+            Log.w(TAG_UPDATE, "checkForUpdate aborted: updateUrl is blank")
             if (!silent) {
                 _updateState.update { it.copy(statusMessage = "请先填写 version.json 地址") }
             }
             return
         }
         viewModelScope.launch {
-            _updateState.update { it.copy(isChecking = true, statusMessage = null) }
+            _updateState.update { it.copy(isChecking = true, updateUrl = url, statusMessage = null) }
             appUpdater.checkForUpdate(url)
                 .onSuccess { remote ->
+                    Log.d(TAG_UPDATE, "checkForUpdate success: remote=$remote")
                     _updateState.update {
                         it.copy(
                             isChecking = false,
@@ -181,6 +191,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
                 .onFailure { err ->
+                    Log.e(TAG_UPDATE, "checkForUpdate failed: ${err.message}", err)
                     _updateState.update {
                         it.copy(
                             isChecking = false,
@@ -222,6 +233,7 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     }
 
     companion object {
+        private const val TAG_UPDATE = "XiaozhiUpdate"
         const val LOCAL_GUIDE_URL = "file:///android_asset/guide.html"
     }
 }

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -49,9 +50,11 @@ class AppUpdater(private val context: Context) {
                 val url = versionJsonUrl.trim()
                 if (url.isEmpty()) return@runCatching null
 
+                Log.d("XiaozhiUpdate", "GET versionJsonUrl=$url (localCode=${getCurrentVersionCode()})")
                 val request = Request.Builder().url(url).get().build()
                 client.newCall(request).execute().use { response ->
                     val raw = response.body?.string().orEmpty()
+                    Log.d("XiaozhiUpdate", "HTTP ${response.code}, body=${raw.take(300)}")
                     if (!response.isSuccessful) {
                         error("HTTP ${response.code}")
                     }
@@ -60,6 +63,7 @@ class AppUpdater(private val context: Context) {
                     val remoteName = json.optString("versionName", "")
                     val apkUrl = json.optString("apkUrl", "")
                     val changelog = json.optString("changelog", "")
+                    Log.d("XiaozhiUpdate", "Parsed remoteCode=$remoteCode, localCode=${getCurrentVersionCode()}, apkUrl=$apkUrl")
                     if (remoteCode > getCurrentVersionCode() && apkUrl.isNotBlank()) {
                         RemoteAppVersion(
                             versionCode = remoteCode,
