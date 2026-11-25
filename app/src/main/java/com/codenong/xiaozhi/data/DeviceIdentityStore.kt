@@ -68,13 +68,15 @@ class DeviceIdentityStore(context: Context) {
         }
     }
 
-    fun getUpdateCheckUrl(): String = prefs.getString(KEY_UPDATE_URL, "") ?: ""
+    fun getUpdateCheckUrl(): String =
+        prefs.getString(KEY_UPDATE_URL, DEFAULT_UPDATE_URL)?.ifBlank { DEFAULT_UPDATE_URL } ?: DEFAULT_UPDATE_URL
+
+    fun getGuideUrl(): String =
+        prefs.getString(KEY_GUIDE_URL, DEFAULT_GUIDE_URL)?.ifBlank { DEFAULT_GUIDE_URL } ?: DEFAULT_GUIDE_URL
 
     fun setUpdateCheckUrl(url: String) {
         prefs.edit().putString(KEY_UPDATE_URL, url.trim()).apply()
     }
-
-    fun getGuideUrl(): String = prefs.getString(KEY_GUIDE_URL, "") ?: ""
 
     fun setGuideUrl(url: String) {
         prefs.edit().putString(KEY_GUIDE_URL, url.trim()).apply()
@@ -103,6 +105,8 @@ class DeviceIdentityStore(context: Context) {
 
     companion object {
         const val DEFAULT_OTA_URL = "https://api.tenclass.net/xiaozhi/ota/"
+        const val DEFAULT_UPDATE_URL = "https://xiaozhi-android.pages.dev/version.json"
+        const val DEFAULT_GUIDE_URL = "https://xiaozhi-android.pages.dev/guide.html" // 留空也可，会自动按 updateUrl 同目录推导
         private const val KEY_CLIENT_ID = "client_id"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_OTA_URL = "ota_url"
