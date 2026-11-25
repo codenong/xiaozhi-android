@@ -212,15 +212,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             reminderControl = object : ReminderControlListener {
                 override fun onGetCurrentTime(): String = reminderManager.getCurrentTimeJson()
 
-                override fun onGetFiredReminder(): String {
-                    val msg = lastFiredReminderMessage?.trim().orEmpty()
-                    val isGeneric = msg.isEmpty() || msg in setOf("提醒", "闹钟", "定时提醒", "时间到了")
-                    return if (isGeneric) {
-                        "没有具体提醒内容，请直接用语音说：提醒时间到了。"
-                    } else {
-                        "必须用语音直接播报以下具体提醒内容（不要只说时间到了）：时间到了，提醒你$msg。"
-                    }
-                }
+                override fun onGetFiredReminder(): String = formatFiredAlertInstruction()
 
                 override fun onCreateReminder(
                     message: String,
@@ -240,12 +232,18 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
                 override fun onListReminders(): String {
                     val items = reminderManager.listReminders()
-                    return if (items.isEmpty()) {
+                    val listText = if (items.isEmpty()) {
                         "当前没有待触发的提醒"
                     } else {
                         items.joinToString("；") {
                             "ID ${it.id}（${reminderManager.formatTriggerTime(it.triggerAtMs)}）：${it.message}"
                         }
+                    }
+                    val firedMsg = if (isReminderActive) lastFiredReminderMessage?.trim().orEmpty() else ""
+                    return if (firedMsg.isNotEmpty()) {
+                        "${formatFiredAlertInstruction()}（其余待触发提醒：$listText）"
+                    } else {
+                        listText
                     }
                 }
 
@@ -500,6 +498,16 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
     }
 
+    private fun formatFiredAlertInstruction(): String {
+        val msg = lastFiredReminderMessage?.trim().orEmpty()
+        val isGeneric = msg.isEmpty() || msg in setOf("提醒", "闹钟", "定时提醒", "时间到了")
+        return if (isGeneric) {
+            "没有具体提醒内容，请直接用语音说：提醒时间到了。"
+        } else {
+            "必须用语音直接播报以下具体提醒内容（不要只说时间到了）：时间到了，提醒你$msg。"
+        }
+    }
+
     private fun handleReminderFired(reminderId: Int, message: String) {
         if (reminderId > 0) {
             reminderManager.markTriggered(reminderId)
@@ -526,7 +534,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             return
         }
 
-        val prompt = "请查闹钟提醒"
+        val trimmedMsg = message.trim()
+        val isGeneric = trimmedMsg.isEmpty() || trimmedMsg in setOf("提醒", "闹钟", "定时提醒", "时间到了")
+        val prompt = if (!isGeneric && trimmedMsg.length <= 12) trimmedMsg else "闹钟响了"
         isReminderActive = true
         pendingReminderPrompt = prompt
 

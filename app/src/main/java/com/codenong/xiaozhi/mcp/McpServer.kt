@@ -185,12 +185,12 @@ class McpServer(
             ))
             put(toolSchema(
                 name = "self.reminder.list",
-                description = "List all pending reminders scheduled on the device.",
+                description = "List future pending reminders scheduled on the device (for ringing alarm content, call self.reminder.get_fired_alert).",
                 properties = JSONObject()
             ))
             put(toolSchema(
                 name = "self.reminder.get_fired_alert",
-                description = "REQUIRED whenever '请查闹钟提醒' or '闹钟响了' is received: fetch the exact reminder content and read that specific content aloud to the user.",
+                description = "REQUIRED whenever '闹钟响了' or '请查闹钟提醒' is received: fetch the exact ringing reminder content and read that specific content aloud to the user.",
                 properties = JSONObject()
             ))
             put(toolSchema(
