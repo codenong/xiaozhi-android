@@ -60,6 +60,9 @@ class AudioEngine(
     var powerSaveEnabled: Boolean = false
 
     @Volatile
+    var isMusicPlaying: Boolean = false
+
+    @Volatile
     private var exitWordCooldownUntilMs: Long = 0L
 
     private var kwsActiveUntilMs: Long = 0L
@@ -183,14 +186,19 @@ class AudioEngine(
                     CaptureMode.WAKE_WORD -> {
                         val now = System.currentTimeMillis()
                         val avgAmp = averageAmplitude(pcmBuffer, read)
-                        if (avgAmp > MUSIC_DUCK_AMP_THRESHOLD) {
-                            musicDuckUntilMs = now + MUSIC_DUCK_HANGOVER_MS
-                            if (!isMusicDucked) {
-                                isMusicDucked = true
-                                Log.d("XiaozhiAudio", "Post-AEC speech energy avgAmp=$avgAmp > $MUSIC_DUCK_AMP_THRESHOLD, ducking music")
-                                onWakeSpeechEnergy(true)
+                        if (isMusicPlaying) {
+                            if (avgAmp > MUSIC_DUCK_AMP_THRESHOLD) {
+                                musicDuckUntilMs = now + MUSIC_DUCK_HANGOVER_MS
+                                if (!isMusicDucked) {
+                                    isMusicDucked = true
+                                    Log.d("XiaozhiAudio", "Post-AEC speech energy avgAmp=$avgAmp > $MUSIC_DUCK_AMP_THRESHOLD, ducking music")
+                                    onWakeSpeechEnergy(true)
+                                }
+                            } else if (isMusicDucked && now >= musicDuckUntilMs) {
+                                isMusicDucked = false
+                                onWakeSpeechEnergy(false)
                             }
-                        } else if (isMusicDucked && now >= musicDuckUntilMs) {
+                        } else if (isMusicDucked) {
                             isMusicDucked = false
                             onWakeSpeechEnergy(false)
                         }
@@ -387,7 +395,7 @@ class AudioEngine(
     companion object {
         private const val WAKE_ENERGY_THRESHOLD = 45L
         private const val WAKE_HANGOVER_MS = 3000L
-        private const val MUSIC_DUCK_AMP_THRESHOLD = 120L
+        private const val MUSIC_DUCK_AMP_THRESHOLD = 850L
         private const val MUSIC_DUCK_HANGOVER_MS = 2500L
         private const val PRE_ROLL_FRAMES = 6
     }

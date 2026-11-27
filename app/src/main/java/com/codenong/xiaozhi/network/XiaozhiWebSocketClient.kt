@@ -126,7 +126,7 @@ class XiaozhiWebSocketClient(
         webSocket?.send(hello.toString())
     }
 
-    fun sendWakeWordDetected(keyword: String) {
+    fun sendWakeWordDetected(keyword: String): Boolean {
         val msg = JSONObject().apply {
             put("session_id", sessionId)
             put("type", "listen")
@@ -134,10 +134,12 @@ class XiaozhiWebSocketClient(
             put("text", keyword)
         }
         Log.i(TAG_WS, "-> listen/detect: $keyword")
-        webSocket?.send(msg.toString())
+        val ok = webSocket?.send(msg.toString()) == true
+        if (!ok) socketOpen = false
+        return ok
     }
 
-    fun sendStartListening(mode: String = "auto") {
+    fun sendStartListening(mode: String = "auto"): Boolean {
         val msg = JSONObject().apply {
             put("session_id", sessionId)
             put("type", "listen")
@@ -145,7 +147,9 @@ class XiaozhiWebSocketClient(
             put("mode", mode)
         }
         Log.i(TAG_WS, "-> listen/start: mode=$mode")
-        webSocket?.send(msg.toString())
+        val ok = webSocket?.send(msg.toString()) == true
+        if (!ok) socketOpen = false
+        return ok
     }
 
     fun sendStopListening() {

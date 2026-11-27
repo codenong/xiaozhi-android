@@ -110,6 +110,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     @Volatile
     private var lastFiredReminderMessage: String? = null
     private var deferredMusicJob: Job? = null
+    private var connectTimeoutJob: Job? = null
     private var deferredCallJob: Job? = null
 
     private lateinit var batteryAlertMonitor: BatteryAlertMonitor
@@ -140,6 +141,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         musicPlayer = MusicPlayer(
             context = applicationContext,
             onStateChanged = { playback ->
+                audioEngine.isMusicPlaying = playback.isPlaying
                 _uiState.update {
                     it.copy(
                         musicTitle = playback.title,
@@ -360,7 +362,11 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         hasMicPermission = granted
         phoneCallManager.startMonitoring()
         if (granted && _uiState.value.deviceState == DeviceState.IDLE && !phoneCallManager.isInSystemCall) {
-            maybeStartWakeWordListening()
+            if (cachedWsConfig != null && isNetworkAvailable && !wsClient.isConnected()) {
+                startConversation()
+            } else {
+                maybeStartWakeWordListening()
+            }
         }
     }
 
@@ -395,7 +401,11 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                                 subtitle = idleHint()
                             )
                         }
-                        maybeStartWakeWordListening()
+                        if (hasMicPermission && isNetworkAvailable && !phoneCallManager.isInSystemCall) {
+                            startConversation()
+                        } else {
+                            maybeStartWakeWordListening()
+                        }
                     }
                 }
                 .onFailure { err ->
@@ -908,15 +918,19 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         acquireWifiLock()
         if (wsClient.isConnected()) {
             Log.i("XiaozhiWS", "Reusing active WebSocket connection (skipping reconnect)")
-            audioEngine.ensurePlaybackStarted(lastOutputSampleRate)
-            playConnectedChime()
+            var sendOk = true
             pendingWakeKeyword?.let { kw ->
                 val serverWakeWord = if (kw in _uiState.value.availableWakeWords) kw else "你好小智"
-                wsClient.sendWakeWordDetected(serverWakeWord)
+                sendOk = wsClient.sendWakeWordDetected(serverWakeWord)
                 pendingWakeKeyword = null
             }
-            startListeningInternal()
-            return
+            if (sendOk) {
+                audioEngine.ensurePlaybackStarted(lastOutputSampleRate)
+                playConnectedChime()
+                startListeningInternal()
+                return
+            }
+            Log.w("XiaozhiWS", "Reused WebSocket send failed, reconnecting...")
         }
         _uiState.update {
             it.copy(
@@ -926,6 +940,22 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             )
         }
         updateNotification("正在连接小智语音网关...")
+        connectTimeoutJob?.cancel()
+        connectTimeoutJob = serviceScope.launch {
+            delay(8000L)
+            if (_uiState.value.deviceState == DeviceState.CONNECTING) {
+                Log.w("XiaozhiWS", "WebSocket handshake timeout (8s)")
+                wsClient.disconnect()
+                _uiState.update {
+                    it.copy(
+                        deviceState = DeviceState.IDLE,
+                        subtitle = idleHint(),
+                        errorMessage = "连接语音网关超时，请稍后重试"
+                    )
+                }
+                maybeStartWakeWordListening()
+            }
+        }
         wsClient.connect(identityStore.getIdentity(), ws, aecEnabled = isRealtimeMode())
     }
 
@@ -1009,6 +1039,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onServerHello(sessionId: String, outputSampleRate: Int) {
+        connectTimeoutJob?.cancel()
         lastOutputSampleRate = outputSampleRate
         audioEngine.ensurePlaybackStarted(outputSampleRate)
         playConnectedChime()
@@ -1137,6 +1168,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onClosed(reason: String, isError: Boolean) {
+        connectTimeoutJob?.cancel()
         if (isReminderActive && isError) {
             pendingReminderPrompt = null
             playFallbackReminderTone()
