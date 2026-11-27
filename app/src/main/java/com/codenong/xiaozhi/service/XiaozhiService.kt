@@ -135,7 +135,6 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         identityStore = DeviceIdentityStore(applicationContext)
         wakeWordDetector = WakeWordDetector(applicationContext)
         musicPlayer = MusicPlayer(applicationContext) { playback ->
-            _uiState.update { it.copy(aecAvailable = hasAec) }
         _uiState.update {
                 it.copy(
                     musicTitle = playback.title,
