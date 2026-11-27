@@ -14,7 +14,8 @@ data class MusicPlaybackState(
 
 class MusicPlayer(
     private val context: Context,
-    private val onStateChanged: (MusicPlaybackState) -> Unit
+    private val onStateChanged: (MusicPlaybackState) -> Unit,
+    private val onPlaybackCompleted: () -> Unit = {}
 ) {
     private var mediaPlayer: MediaPlayer? = null
     private var currentUrl: String? = null
@@ -24,6 +25,8 @@ class MusicPlayer(
     private var isBuffering: Boolean = false
     private var deferredStart: Boolean = false
     private var pausedByUserOrChat: Boolean = false
+    @Volatile
+    private var isDucked: Boolean = false
 
     @Synchronized
     fun play(url: String, title: String?, deferStart: Boolean, seekToMs: Int = 0) {
@@ -55,6 +58,8 @@ class MusicPlayer(
                     runCatching { player.seekTo(lastPositionMs) }
                     lastPositionMs = 0
                 }
+                val vol = if (isDucked) 0.25f else 1.0f
+                runCatching { player.setVolume(vol, vol) }
                 if (!deferredStart && !pausedByUserOrChat) {
                     runCatching { player.start() }
                         .onFailure { Log.e(TAG, "MediaPlayer start failed: ${it.message}", it) }
@@ -67,6 +72,7 @@ class MusicPlayer(
                 if (mediaPlayer !== player) return@setOnCompletionListener
                 stopInternal(notify = true)
             }
+            onPlaybackCompleted()
         }
         mp.setOnErrorListener { player, what, extra ->
             Log.w(TAG, "MediaPlayer error: what=$what extra=$extra")
@@ -155,6 +161,15 @@ class MusicPlayer(
     }
 
     @Synchronized
+    fun setDucked(ducked: Boolean) {
+        if (isDucked == ducked) return
+        isDucked = ducked
+        val vol = if (ducked) 0.25f else 1.0f
+        runCatching { mediaPlayer?.setVolume(vol, vol) }
+        Log.i(TAG, if (ducked) "Music ducked to 25% volume" else "Music restored to 100% volume")
+    }
+
+    @Synchronized
     fun isActive(): Boolean {
         val mp = mediaPlayer ?: return false
         return isBuffering || deferredStart || (isPrepared && mp.isPlaying)
@@ -180,6 +195,7 @@ class MusicPlayer(
         isBuffering = false
         deferredStart = false
         pausedByUserOrChat = false
+        isDucked = false
         if (mp != null) {
             runCatching {
                 if (mp.isPlaying) mp.stop()

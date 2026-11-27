@@ -35,7 +35,8 @@ class AudioEngine(
     private val onEncodedFrame: (ByteArray) -> Unit,
     private val onWakeWordDetected: (String) -> Unit,
     private val onExitWordDetected: (String) -> Unit,
-    private val onVoiceActivity: (Boolean) -> Unit
+    private val onVoiceActivity: (Boolean) -> Unit,
+    private val onWakeSpeechEnergy: (Boolean) -> Unit = {}
 ) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioRecord: AudioRecord? = null
@@ -63,6 +64,8 @@ class AudioEngine(
 
     private var kwsActiveUntilMs: Long = 0L
     private val kwsPreRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES + 1)
+    private var musicDuckUntilMs: Long = 0L
+    private var isMusicDucked: Boolean = false
 
     fun startWakeWordDetection(
         selectedWakeWord: String? = null,
@@ -104,11 +107,19 @@ class AudioEngine(
         wakeWordDetector.initialize(selectedWakeWord, exitWord, wakeTokens, exitTokens)
         wakeWordDetector.reset()
         exitWordCooldownUntilMs = System.currentTimeMillis() + 800L
+        if (isMusicDucked) {
+            isMusicDucked = false
+            onWakeSpeechEnergy(false)
+        }
         captureMode = CaptureMode.CONVERSATION
         ensureCaptureLoopRunning()
     }
 
     fun stopCapture() {
+        if (isMusicDucked) {
+            isMusicDucked = false
+            onWakeSpeechEnergy(false)
+        }
         captureMode = CaptureMode.OFF
         recordJob?.cancel()
         recordJob = null
@@ -146,6 +157,9 @@ class AudioEngine(
         }
         if (AcousticEchoCanceler.isAvailable()) {
             aec = AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
+            Log.i("XiaozhiAudio", "AcousticEchoCanceler created: enabled=${aec?.enabled}")
+        } else {
+            Log.i("XiaozhiAudio", "AcousticEchoCanceler unavailable on this device")
         }
         if (NoiseSuppressor.isAvailable()) {
             ns = NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true }
@@ -167,6 +181,19 @@ class AudioEngine(
 
                 when (captureMode) {
                     CaptureMode.WAKE_WORD -> {
+                        val now = System.currentTimeMillis()
+                        val avgAmp = averageAmplitude(pcmBuffer, read)
+                        if (avgAmp > MUSIC_DUCK_AMP_THRESHOLD) {
+                            musicDuckUntilMs = now + MUSIC_DUCK_HANGOVER_MS
+                            if (!isMusicDucked) {
+                                isMusicDucked = true
+                                Log.d("XiaozhiAudio", "Post-AEC speech energy avgAmp=$avgAmp > $MUSIC_DUCK_AMP_THRESHOLD, ducking music")
+                                onWakeSpeechEnergy(true)
+                            }
+                        } else if (isMusicDucked && now >= musicDuckUntilMs) {
+                            isMusicDucked = false
+                            onWakeSpeechEnergy(false)
+                        }
                         if (exitWordEnabled || !powerSaveEnabled) {
                             val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
                             if (keyword != null) {
@@ -178,8 +205,6 @@ class AudioEngine(
                                 }
                             }
                         } else {
-                            val now = System.currentTimeMillis()
-                            val avgAmp = averageAmplitude(pcmBuffer, read)
                             if (avgAmp > WAKE_ENERGY_THRESHOLD) {
                                 if (now >= kwsActiveUntilMs && kwsPreRoll.isNotEmpty()) {
                                     for (pre in kwsPreRoll) {
@@ -362,6 +387,8 @@ class AudioEngine(
     companion object {
         private const val WAKE_ENERGY_THRESHOLD = 45L
         private const val WAKE_HANGOVER_MS = 3000L
+        private const val MUSIC_DUCK_AMP_THRESHOLD = 120L
+        private const val MUSIC_DUCK_HANGOVER_MS = 2500L
         private const val PRE_ROLL_FRAMES = 6
     }
 }

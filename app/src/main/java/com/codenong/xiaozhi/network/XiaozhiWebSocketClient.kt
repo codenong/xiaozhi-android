@@ -2,6 +2,7 @@ package com.codenong.xiaozhi.network
 
 import com.codenong.xiaozhi.model.DeviceIdentity
 import com.codenong.xiaozhi.model.WebSocketConfig
+import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -42,6 +43,11 @@ class XiaozhiWebSocketClient(
     @Volatile
     private var aecEnabled: Boolean = false
 
+    @Volatile
+    private var socketOpen: Boolean = false
+
+    fun isConnected(): Boolean = socketOpen && webSocket != null
+
     fun connect(identity: DeviceIdentity, config: WebSocketConfig, aecEnabled: Boolean = false) {
         this.aecEnabled = aecEnabled
         disconnect()
@@ -63,6 +69,8 @@ class XiaozhiWebSocketClient(
         webSocket = client.newWebSocket(reqBuilder.build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
+                socketOpen = true
+                Log.i(TAG_WS, "onOpen connected to ${config.url} (aec=$aecEnabled)")
                 sendHello(config.version)
             }
 
@@ -78,17 +86,21 @@ class XiaozhiWebSocketClient(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
+                socketOpen = false
                 this@XiaozhiWebSocketClient.webSocket = null
                 sessionId = ""
                 val detail = t.message ?: response?.message ?: "无法连接语音服务器"
+                Log.w(TAG_WS, "onFailure: $detail")
                 listener.onClosed(detail, true)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
+                socketOpen = false
                 this@XiaozhiWebSocketClient.webSocket = null
                 sessionId = ""
                 val isError = code != 1000
+                Log.i(TAG_WS, "onClosed: code=$code reason=$reason isError=$isError")
                 listener.onClosed(reason.ifEmpty { "连接已断开 ($code)" }, isError)
             }
         })
@@ -110,6 +122,7 @@ class XiaozhiWebSocketClient(
                 put("frame_duration", 60)
             })
         }
+        Log.i(TAG_WS, "-> hello: $hello")
         webSocket?.send(hello.toString())
     }
 
@@ -120,6 +133,7 @@ class XiaozhiWebSocketClient(
             put("state", "detect")
             put("text", keyword)
         }
+        Log.i(TAG_WS, "-> listen/detect: $keyword")
         webSocket?.send(msg.toString())
     }
 
@@ -130,6 +144,7 @@ class XiaozhiWebSocketClient(
             put("state", "start")
             put("mode", mode)
         }
+        Log.i(TAG_WS, "-> listen/start: mode=$mode")
         webSocket?.send(msg.toString())
     }
 
@@ -139,6 +154,7 @@ class XiaozhiWebSocketClient(
             put("type", "listen")
             put("state", "stop")
         }
+        Log.i(TAG_WS, "-> listen/stop")
         webSocket?.send(msg.toString())
     }
 
@@ -148,6 +164,7 @@ class XiaozhiWebSocketClient(
             put("type", "abort")
             put("reason", reason)
         }
+        Log.i(TAG_WS, "-> abort: reason=$reason")
         webSocket?.send(msg.toString())
     }
 
@@ -165,6 +182,7 @@ class XiaozhiWebSocketClient(
     }
 
     fun disconnect() {
+        socketOpen = false
         webSocket?.close(1000, "Client disconnect")
         webSocket = null
         sessionId = ""
@@ -172,25 +190,52 @@ class XiaozhiWebSocketClient(
 
     private fun handleJsonMessage(raw: String) {
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return
-        when (json.optString("type")) {
+        val type = json.optString("type")
+        when (type) {
             "hello" -> {
                 sessionId = json.optString("session_id")
                 val outRate = json.optJSONObject("audio_params")?.optInt("sample_rate", 16000) ?: 16000
+                Log.i(TAG_WS, "<- hello: sessionId=$sessionId sampleRate=$outRate")
                 listener.onServerHello(sessionId, outRate)
             }
-            "stt" -> listener.onSttText(json.optString("text"))
-            "llm" -> listener.onLlmEmotion(json.optString("emotion"), json.optString("text"))
-            "tts" -> when (json.optString("state")) {
-                "start" -> listener.onTtsStart()
-                "stop" -> listener.onTtsStop()
-                "sentence_start" -> listener.onTtsSentence(json.optString("text"))
+            "stt" -> {
+                val sttText = json.optString("text")
+                Log.i(TAG_WS, "<- stt (user input): $sttText")
+                listener.onSttText(sttText)
             }
-            "mcp" -> json.optJSONObject("payload")?.let { listener.onMcpRequest(it) }
-            "alert" -> listener.onAlert(
-                json.optString("status"),
-                json.optString("message"),
-                json.optString("emotion")
-            )
+            "llm" -> {
+                val emo = json.optString("emotion")
+                val llmText = json.optString("text")
+                Log.i(TAG_WS, "<- llm: emotion=$emo text=$llmText")
+                listener.onLlmEmotion(emo, llmText)
+            }
+            "tts" -> {
+                val state = json.optString("state")
+                val ttsText = json.optString("text")
+                Log.i("XiaozhiTTS", "<- tts state=$state${if (ttsText.isNotEmpty()) " text=$ttsText" else ""}")
+                when (state) {
+                    "start" -> listener.onTtsStart()
+                    "stop" -> listener.onTtsStop()
+                    "sentence_start" -> listener.onTtsSentence(ttsText)
+                }
+            }
+            "mcp" -> {
+                val payload = json.optJSONObject("payload")
+                Log.i(TAG_WS, "<- mcp: method=${payload?.optString("method")} id=${payload?.opt("id")}")
+                payload?.let { listener.onMcpRequest(it) }
+            }
+            "alert" -> {
+                val status = json.optString("status")
+                val message = json.optString("message")
+                val emotion = json.optString("emotion")
+                Log.i(TAG_WS, "<- alert: [$status] $message")
+                listener.onAlert(status, message, emotion)
+            }
+            else -> Log.d(TAG_WS, "<- $type: $raw")
         }
+    }
+
+    companion object {
+        private const val TAG_WS = "XiaozhiWS"
     }
 }

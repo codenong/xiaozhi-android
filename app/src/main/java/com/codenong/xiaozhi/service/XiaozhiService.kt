@@ -16,7 +16,9 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.media.Ringtone
+import android.media.AudioManager
 import android.media.RingtoneManager
+import android.media.ToneGenerator
 import android.media.audiofx.AcousticEchoCanceler
 import android.util.Log
 import android.os.PowerManager
@@ -129,19 +131,32 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private var activationJob: Job? = null
     private var hasMicPermission: Boolean = false
     private var pendingWakeKeyword: String? = null
+    private var lastOutputSampleRate: Int = 16000
 
     override fun onCreate() {
         super.onCreate()
         identityStore = DeviceIdentityStore(applicationContext)
         wakeWordDetector = WakeWordDetector(applicationContext)
-        musicPlayer = MusicPlayer(applicationContext) { playback ->
-        _uiState.update {
-                it.copy(
-                    musicTitle = playback.title,
-                    isMusicPlaying = playback.isPlaying
-                )
+        musicPlayer = MusicPlayer(
+            context = applicationContext,
+            onStateChanged = { playback ->
+                _uiState.update {
+                    it.copy(
+                        musicTitle = playback.title,
+                        isMusicPlaying = playback.isPlaying
+                    )
+                }
+            },
+            onPlaybackCompleted = {
+                serviceScope.launch {
+                    val wsConnected = wsClient.isConnected()
+                    Log.i("XiaozhiAudio", "Music completed: wsConnected=$wsConnected, state=${_uiState.value.deviceState}")
+                    if (!wsConnected && isNetworkAvailable && hasMicPermission && _uiState.value.deviceState == DeviceState.IDLE) {
+                        startConversation()
+                    }
+                }
             }
-        }
+        )
         phoneCallManager = PhoneCallManager(applicationContext) { inCall ->
             serviceScope.launch {
                 handleSystemCallStateChanged(inCall)
@@ -269,7 +284,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             opusCodec = opusCodec,
             wakeWordDetector = wakeWordDetector,
             onEncodedFrame = { opus ->
-                if (_uiState.value.deviceState == DeviceState.LISTENING) {
+                val state = _uiState.value.deviceState
+                if (state == DeviceState.LISTENING || (isRealtimeMode() && state == DeviceState.SPEAKING)) {
                     wsClient.sendAudioFrame(opus)
                 }
             },
@@ -283,7 +299,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                     handleExitWordTriggered()
                 }
             },
-            onVoiceActivity = { /* 可用于本地打断优化 */ }
+            onVoiceActivity = { /* 可用于本地打断优化 */ },
+            onWakeSpeechEnergy = { active ->
+                if (musicPlayer.isActive()) {
+                    musicPlayer.setDucked(active)
+                }
+            }
         )
 
         batteryAlertMonitor = BatteryAlertMonitor(applicationContext)
@@ -464,7 +485,6 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 audioEngine.clearPlayback()
             }
             audioEngine.restoreAudioMode()
-            wsClient.disconnect()
             _uiState.update {
                 it.copy(
                     deviceState = DeviceState.IDLE,
@@ -886,6 +906,18 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         audioEngine.exitWordEnabled = false
         acquireWakeLock()
         acquireWifiLock()
+        if (wsClient.isConnected()) {
+            Log.i("XiaozhiWS", "Reusing active WebSocket connection (skipping reconnect)")
+            audioEngine.ensurePlaybackStarted(lastOutputSampleRate)
+            playConnectedChime()
+            pendingWakeKeyword?.let { kw ->
+                val serverWakeWord = if (kw in _uiState.value.availableWakeWords) kw else "你好小智"
+                wsClient.sendWakeWordDetected(serverWakeWord)
+                pendingWakeKeyword = null
+            }
+            startListeningInternal()
+            return
+        }
         _uiState.update {
             it.copy(
                 deviceState = DeviceState.CONNECTING,
@@ -945,7 +977,6 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             audioEngine.clearPlayback()
         }
         audioEngine.restoreAudioMode()
-        wsClient.disconnect()
         _uiState.update {
             it.copy(
                 deviceState = DeviceState.IDLE,
@@ -964,8 +995,23 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
     }
 
+    private fun playConnectedChime() {
+        serviceScope.launch(Dispatchers.IO) {
+            runCatching {
+                val tone = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 65)
+                tone.startTone(ToneGenerator.TONE_PROP_ACK, 120)
+                delay(250L)
+                tone.release()
+            }.onFailure { err ->
+                Log.w("XiaozhiAudio", "playConnectedChime failed: ${err.message}")
+            }
+        }
+    }
+
     override fun onServerHello(sessionId: String, outputSampleRate: Int) {
+        lastOutputSampleRate = outputSampleRate
         audioEngine.ensurePlaybackStarted(outputSampleRate)
+        playConnectedChime()
         val reminderPrompt = pendingReminderPrompt
         if (reminderPrompt != null) {
             pendingReminderPrompt = null
@@ -1057,6 +1103,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onTtsSentence(text: String) {
+        Log.i("XiaozhiTTS", "onTtsSentence: $text")
         _uiState.update { it.copy(subtitle = text) }
     }
 
@@ -1112,7 +1159,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         audioEngine.restoreAudioMode()
         val userEnded = isUserDisconnecting
         isUserDisconnecting = false
-        val showDisconnectError = !userEnded && (isError || !isNetworkAvailable)
+        val showDisconnectError = !userEnded && _uiState.value.deviceState != DeviceState.IDLE && (isError || !isNetworkAvailable)
         val errText = if (showDisconnectError) {
             if (!isNetworkAvailable) "网络已断开，请检查 Wi-Fi 或移动网络" else "连接已断开：$reason"
         } else {
