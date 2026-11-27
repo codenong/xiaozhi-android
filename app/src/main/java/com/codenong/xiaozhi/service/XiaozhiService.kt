@@ -312,6 +312,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 otaUrl = identity.otaUrl,
                 deviceId = identity.deviceId,
                 powerSaveEnabled = savedPowerSave,
+                aecAvailable = hasAec,
                 availableWakeWords = entries,
                 activeWakeWord = effectiveWake,
                 activeWakeTokens = savedWakeTokens,
