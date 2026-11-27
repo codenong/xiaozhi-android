@@ -113,7 +113,7 @@ class XiaozhiWebSocketClient(
             put("transport", "websocket")
             put("features", JSONObject().apply {
                 put("mcp", true)
-                put("aec", aecEnabled)
+                put("aec", false)
             })
             put("audio_params", JSONObject().apply {
                 put("format", "opus")
