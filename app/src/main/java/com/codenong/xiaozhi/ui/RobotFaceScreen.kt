@@ -148,8 +148,13 @@ fun RobotFaceScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val modeBadge = when {
+                !state.autoContinue -> "手动"
+                state.aecAvailable -> "实时对话(AEC)"
+                else -> "半双工(无AEC)"
+            }
             Text(
-                text = "小智 AI · ${state.deviceState.name} · 唤醒词: $activeWakeLabel",
+                text = "小智 AI · ${state.deviceState.name} · $modeBadge · 唤醒词: $activeWakeLabel",
                 color = Color(0xFF8B949E),
                 fontSize = 14.sp,
                 modifier = Modifier.weight(1f)

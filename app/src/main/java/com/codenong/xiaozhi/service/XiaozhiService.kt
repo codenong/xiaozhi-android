@@ -17,6 +17,8 @@ import android.os.Build
 import android.os.IBinder
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.media.audiofx.AcousticEchoCanceler
+import android.util.Log
 import android.os.PowerManager
 import com.codenong.xiaozhi.MainActivity
 import com.codenong.xiaozhi.audio.AudioEngine
@@ -62,6 +64,7 @@ data class XiaozhiUiState(
     val autoContinue: Boolean = true,
     val handsFreeWakeEnabled: Boolean = true,
     val powerSaveEnabled: Boolean = false,
+    val aecAvailable: Boolean = false,
     val availableWakeWords: List<String> = emptyList(),
     val activeWakeWord: String = "",
     val activeWakeTokens: String = "",
@@ -132,7 +135,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         identityStore = DeviceIdentityStore(applicationContext)
         wakeWordDetector = WakeWordDetector(applicationContext)
         musicPlayer = MusicPlayer(applicationContext) { playback ->
-            _uiState.update {
+            _uiState.update { it.copy(aecAvailable = hasAec) }
+        _uiState.update {
                 it.copy(
                     musicTitle = playback.title,
                     isMusicPlaying = playback.isPlaying
@@ -258,6 +262,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             }
         )
         wsClient = XiaozhiWebSocketClient(this)
+        val hasAec = AcousticEchoCanceler.isAvailable()
+        Log.i("XiaozhiAudio", "AcousticEchoCanceler.isAvailable() = $hasAec")
         audioEngine = AudioEngine(
             context = applicationContext,
             scope = serviceScope,
@@ -888,7 +894,16 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             )
         }
         updateNotification("正在连接小智语音网关...")
-        wsClient.connect(identityStore.getIdentity(), ws)
+        wsClient.connect(identityStore.getIdentity(), ws, aecEnabled = isRealtimeMode())
+    }
+
+    private fun isRealtimeMode(): Boolean =
+        _uiState.value.autoContinue && _uiState.value.aecAvailable
+
+    private fun listeningSubtitle(): String = if (isRealtimeMode()) {
+        "我在听，随时可插话...（说「${_uiState.value.activeExitWord}」结束）"
+    } else {
+        "我在听，请说话...（说「${_uiState.value.activeExitWord}」结束）"
     }
 
     private fun startListeningInternal() {
@@ -898,12 +913,16 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                 deviceState = DeviceState.LISTENING,
                 emotion = "listening",
                 emoji = "👂",
-                subtitle = "我在听，请说话...（说「${_uiState.value.activeExitWord}」结束）",
+                subtitle = listeningSubtitle(),
                 errorMessage = null
             )
         }
         updateNotification("正在聆听说话...")
-        val mode = if (_uiState.value.autoContinue) "auto" else "manual"
+        val mode = when {
+            !_uiState.value.autoContinue -> "manual"
+            _uiState.value.aecAvailable -> "realtime"
+            else -> "auto"
+        }
         wsClient.sendStartListening(mode)
         audioEngine.startConversationCapture(
             _uiState.value.activeWakeWord.ifBlank { null },
@@ -962,6 +981,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onSttText(text: String) {
+        if (isRealtimeMode() && _uiState.value.deviceState == DeviceState.SPEAKING) {
+            audioEngine.clearPlayback()
+        }
         _uiState.update { it.copy(userSpeech = text) }
     }
 
@@ -978,7 +1000,14 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         ignoreNextTtsStop = false
         _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
         audioEngine.exitWordEnabled = true
-        if (_uiState.value.handsFreeWakeEnabled && hasMicPermission) {
+        if (isRealtimeMode() && hasMicPermission) {
+            audioEngine.startConversationCapture(
+                _uiState.value.activeWakeWord.ifBlank { null },
+                _uiState.value.activeExitWord,
+                _uiState.value.activeWakeTokens.ifBlank { null },
+                _uiState.value.activeExitTokens.ifBlank { null }
+            )
+        } else if (_uiState.value.handsFreeWakeEnabled && hasMicPermission) {
             maybeStartWakeWordListening()
         } else {
             audioEngine.stopCapture()
@@ -1006,7 +1035,18 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             startMusicAndReturnIdle()
             return
         }
-        if (_uiState.value.autoContinue) {
+        if (isRealtimeMode() && hasMicPermission) {
+            _uiState.update {
+                it.copy(
+                    deviceState = DeviceState.LISTENING,
+                    emotion = "listening",
+                    emoji = "👂",
+                    subtitle = listeningSubtitle(),
+                    errorMessage = null
+                )
+            }
+            updateNotification("正在聆听说话...")
+        } else if (_uiState.value.autoContinue) {
             startListeningInternal()
         } else {
             _uiState.update {

@@ -39,7 +39,11 @@ class XiaozhiWebSocketClient(
     var sessionId: String = ""
         private set
 
-    fun connect(identity: DeviceIdentity, config: WebSocketConfig) {
+    @Volatile
+    private var aecEnabled: Boolean = false
+
+    fun connect(identity: DeviceIdentity, config: WebSocketConfig, aecEnabled: Boolean = false) {
+        this.aecEnabled = aecEnabled
         disconnect()
         val reqBuilder = Request.Builder()
             .url(config.url)
@@ -97,7 +101,7 @@ class XiaozhiWebSocketClient(
             put("transport", "websocket")
             put("features", JSONObject().apply {
                 put("mcp", true)
-                put("aec", false)
+                put("aec", aecEnabled)
             })
             put("audio_params", JSONObject().apply {
                 put("format", "opus")
