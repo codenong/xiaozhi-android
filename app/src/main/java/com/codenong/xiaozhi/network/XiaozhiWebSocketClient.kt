@@ -98,7 +98,12 @@ class XiaozhiWebSocketClient(
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
-                Log.i(TAG_WS, "<- onClosing: code=$code reason=$reason")
+                Log.i(TAG_WS, "<- onClosing (server closed): code=$code reason=$reason")
+                socketOpen = false
+                this@XiaozhiWebSocketClient.webSocket = null
+                sessionId = ""
+                runCatching { webSocket.close(1000, "Server closing") }
+                listener.onClosed(reason.ifEmpty { "服务端已结束会话" }, isError = false)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
