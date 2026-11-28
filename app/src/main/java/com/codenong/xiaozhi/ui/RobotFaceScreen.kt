@@ -711,31 +711,7 @@ fun RobotFaceScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = customExitInput,
-                        onValueChange = {
-                            customExitInput = it
-                            customExitTokens = onPreviewPromptTokens(it)
-                            promptError = null
-                        },
-                        label = { Text("结束词") },
-                        placeholder = { Text("默认：小智退下") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = customExitTokens,
-                        onValueChange = {
-                            customExitTokens = it
-                            promptError = null
-                        },
-                        label = { Text("结束词拼音（多音字可微调）") },
-                        placeholder = { Text("例如：x iǎo zh ì t uì x ià") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+
                     promptError?.let { err ->
                         Spacer(Modifier.height(8.dp))
                         Text(err, fontSize = 12.sp, color = Color(0xFFFF7B72))

@@ -113,6 +113,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private var lastFiredReminderMessage: String? = null
     private var deferredMusicJob: Job? = null
     private var connectTimeoutJob: Job? = null
+    private var endConversationFallbackJob: Job? = null
     private var deferredCallJob: Job? = null
 
     private lateinit var batteryAlertMonitor: BatteryAlertMonitor
@@ -126,6 +127,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private var isUserDisconnecting: Boolean = false
     @Volatile
     private var ignoreNextTtsStop: Boolean = false
+    @Volatile
+    private var pendingEndConversationAfterTts: Boolean = false
 
     private val _uiState = MutableStateFlow(XiaozhiUiState())
     val uiState: StateFlow<XiaozhiUiState> = _uiState.asStateFlow()
@@ -277,6 +280,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                         "已取消 ${removed.size} 条提醒：" + removed.joinToString("、") { it.message }
                     }
                 }
+            },
+            onEndConversation = {
+                serviceScope.launch {
+                    scheduleEndConversationAndCloseWs()
+                }
+                "已准备结束对话并关闭连接。简短告别即可（若用户要求闭嘴或不要插话请不要再说话）。"
             }
         )
         wsClient = XiaozhiWebSocketClient(this)
@@ -981,9 +990,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         _uiState.value.autoContinue && _uiState.value.aecAvailable
 
     private fun listeningSubtitle(): String = if (isRealtimeMode()) {
-        "我在听，随时可插话...（说「${_uiState.value.activeExitWord}」结束）"
+        "我在听，随时可插话...（说「拜拜 / 退下」结束）"
     } else {
-        "我在听，请说话...（说「${_uiState.value.activeExitWord}」结束）"
+        "我在听，请说话...（说「拜拜 / 退下」结束）"
     }
 
     private fun startListeningInternal() {
@@ -1010,6 +1019,27 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             _uiState.value.activeWakeTokens.ifBlank { null },
             _uiState.value.activeExitTokens.ifBlank { null }
         )
+    }
+
+    private fun scheduleEndConversationAndCloseWs() {
+        Log.i("XiaozhiWS", "LLM requested conversation end; will close WS after TTS/timeout")
+        pendingEndConversationAfterTts = true
+        endConversationFallbackJob?.cancel()
+        endConversationFallbackJob = serviceScope.launch {
+            delay(2500L)
+            if (pendingEndConversationAfterTts) {
+                pendingEndConversationAfterTts = false
+                closeWsAndReturnToWakeStandby()
+            }
+        }
+    }
+
+    private fun closeWsAndReturnToWakeStandby() {
+        endConversationFallbackJob?.cancel()
+        pendingEndConversationAfterTts = false
+        stopConversation()
+        wsClient.disconnect()
+        Log.i("XiaozhiWS", "WebSocket closed by end-conversation tool; waiting for wake word")
     }
 
     private fun stopConversation() {
@@ -1120,6 +1150,9 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             Log.d("XiaozhiTTS", "Ignoring stale onTtsStart while IDLE/disconnecting")
             return
         }
+        if (pendingEndConversationAfterTts) {
+            endConversationFallbackJob?.cancel()
+        }
         audioEngine.notifyTtsSpeaking(true)
         ignoreNextTtsStop = false
         _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
@@ -1143,6 +1176,14 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         audioEngine.notifyTtsSpeaking(false)
         if (ignoreNextTtsStop) {
             ignoreNextTtsStop = false
+            return
+        }
+        if (pendingEndConversationAfterTts) {
+            pendingEndConversationAfterTts = false
+            serviceScope.launch {
+                delay(400L)
+                closeWsAndReturnToWakeStandby()
+            }
             return
         }
         if (isReminderActive) {

@@ -33,7 +33,8 @@ class McpServer(
     private val onBrightnessRequest: (Int) -> Unit,
     private val musicControl: MusicControlListener? = null,
     private val phoneControl: PhoneControlListener? = null,
-    private val reminderControl: ReminderControlListener? = null
+    private val reminderControl: ReminderControlListener? = null,
+    private val onEndConversation: () -> String = { "正在结束对话" }
 ) {
     fun handleRequest(payload: JSONObject): JSONObject? {
         val id = payload.opt("id")
@@ -194,6 +195,11 @@ class McpServer(
                 properties = JSONObject()
             ))
             put(toolSchema(
+                name = "self.conversation.end",
+                description = "End the current voice conversation, close WebSocket, and return to wake-word standby. Call whenever the user says bye bye, goodbye, 再见, 拜拜, 退下吧, 闭嘴, 不要插话, 先这样, 不用聊了, or asks you to stop.",
+                properties = JSONObject()
+            ))
+            put(toolSchema(
                 name = "self.reminder.cancel",
                 description = "Cancel pending reminder(s) by numeric id or keyword.",
                 properties = JSONObject().apply {
@@ -290,6 +296,9 @@ class McpServer(
             }
             "self.reminder.get_fired_alert" -> {
                 (reminderControl?.onGetFiredReminder() ?: "暂无刚触发的提醒") to false
+            }
+            "self.conversation.end" -> {
+                onEndConversation() to false
             }
             "self.reminder.cancel" -> {
                 val remId = if (args.has("id") && !args.isNull("id")) {

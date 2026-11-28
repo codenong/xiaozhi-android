@@ -229,11 +229,6 @@ class AudioEngine(
                             val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
                             if (keyword != null) {
                                 onWakeWordDetected(keyword)
-                            } else if (exitWordEnabled) {
-                                val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
-                                if (exitKeyword != null) {
-                                    onExitWordDetected(exitKeyword)
-                                }
                             }
                         } else {
                             if (avgAmp > WAKE_ENERGY_THRESHOLD) {
@@ -266,13 +261,6 @@ class AudioEngine(
                     }
 
                     CaptureMode.CONVERSATION -> {
-                        if (exitWordEnabled && System.currentTimeMillis() >= exitWordCooldownUntilMs) {
-                            val exitKeyword = wakeWordDetector.processExitWordPcm16(pcmBuffer, read)
-                            if (exitKeyword != null) {
-                                onExitWordDetected(exitKeyword)
-                                continue
-                            }
-                        }
                         val now = System.currentTimeMillis()
                         val avgAmp = pcmBuffer.fold(0L) { acc, s -> acc + abs(s.toInt()) } / frameSamples
                         val vad = avgAmp > 350
