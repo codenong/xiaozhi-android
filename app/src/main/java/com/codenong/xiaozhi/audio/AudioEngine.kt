@@ -84,6 +84,7 @@ class AudioEngine(
     private var kwsActiveUntilMs: Long = 0L
     private val kwsPreRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES + 1)
     private var musicDuckUntilMs: Long = 0L
+    private var musicAmbientEma: Double = 200.0
     private var isMusicDucked: Boolean = false
     private var bargeInUntilMs: Long = 0L
     private val bargeInPreRoll = ArrayDeque<ByteArray>(BARGE_IN_PRE_ROLL_FRAMES + 1)
@@ -210,20 +211,27 @@ class AudioEngine(
                         val now = System.currentTimeMillis()
                         val avgAmp = averageAmplitude(pcmBuffer, read)
                         if (isMusicPlaying) {
-                            if (avgAmp > MUSIC_DUCK_AMP_THRESHOLD) {
+                            val dynThreshold = computeDynamicMusicDuckThreshold()
+                            if (avgAmp > dynThreshold) {
                                 musicDuckUntilMs = now + MUSIC_DUCK_HANGOVER_MS
                                 if (!isMusicDucked) {
                                     isMusicDucked = true
-                                    Log.d("XiaozhiAudio", "Post-AEC speech energy avgAmp=$avgAmp > $MUSIC_DUCK_AMP_THRESHOLD, ducking music")
+                                    Log.d("XiaozhiAudio", "Post-AEC speech energy avgAmp=$avgAmp > dynThreshold=$dynThreshold (ema=${musicAmbientEma.toLong()}), ducking music")
                                     onWakeSpeechEnergy(true)
                                 }
-                            } else if (isMusicDucked && now >= musicDuckUntilMs) {
+                            } else {
+                                musicAmbientEma = musicAmbientEma * 0.92 + avgAmp * 0.08
+                                if (isMusicDucked && now >= musicDuckUntilMs) {
+                                    isMusicDucked = false
+                                    onWakeSpeechEnergy(false)
+                                }
+                            }
+                        } else {
+                            musicAmbientEma = 200.0
+                            if (isMusicDucked) {
                                 isMusicDucked = false
                                 onWakeSpeechEnergy(false)
                             }
-                        } else if (isMusicDucked) {
-                            isMusicDucked = false
-                            onWakeSpeechEnergy(false)
                         }
                         if (exitWordEnabled || !powerSaveEnabled) {
                             val keyword = wakeWordDetector.processPcm16(pcmBuffer, read)
@@ -373,6 +381,15 @@ class AudioEngine(
 
     fun pausePlayback() {
         clearPlayback(resumePlay = false)
+    }
+
+    private fun computeDynamicMusicDuckThreshold(): Long {
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val curVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(0, maxVol)
+        val volRatio = curVol.toFloat() / maxVol.toFloat()
+        val volBased = (300L + (volRatio * 700f).toLong()).coerceAtLeast(350L)
+        val emaBased = (musicAmbientEma * 2.2).toLong()
+        return maxOf(volBased, emaBased).coerceAtMost(1800L)
     }
 
     private fun averageAmplitude(pcm: ShortArray, length: Int): Long {

@@ -170,6 +170,9 @@ class MusicPlayer(
     }
 
     @Synchronized
+    fun isPausedWithTrack(): Boolean = pausedByUserOrChat && !currentUrl.isNullOrBlank()
+
+    @Synchronized
     fun isActive(): Boolean {
         val mp = mediaPlayer ?: return false
         return isBuffering || deferredStart || (isPrepared && mp.isPlaying)

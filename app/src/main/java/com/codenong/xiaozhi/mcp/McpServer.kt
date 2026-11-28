@@ -34,7 +34,8 @@ class McpServer(
     private val musicControl: MusicControlListener? = null,
     private val phoneControl: PhoneControlListener? = null,
     private val reminderControl: ReminderControlListener? = null,
-    private val onEndConversation: () -> String = { "正在结束对话" }
+    private val onEndConversation: () -> String = { "正在结束对话" },
+    private val onVolumeChanged: (Int) -> Unit = {}
 ) {
     fun handleRequest(payload: JSONObject): JSONObject? {
         val id = payload.opt("id")
@@ -236,6 +237,7 @@ class McpServer(
             "self.audio_speaker.set_volume" -> {
                 val vol = args.optInt("volume", 50).coerceIn(0, 100)
                 setMediaVolume(vol)
+                onVolumeChanged(vol)
                 "true" to false
             }
             "self.screen.set_brightness" -> {

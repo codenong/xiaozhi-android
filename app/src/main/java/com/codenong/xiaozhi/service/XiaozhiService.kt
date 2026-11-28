@@ -129,6 +129,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     private var ignoreNextTtsStop: Boolean = false
     @Volatile
     private var pendingEndConversationAfterTts: Boolean = false
+    @Volatile
+    private var resumeMusicAfterVolumeTts: Boolean = false
 
     private val _uiState = MutableStateFlow(XiaozhiUiState())
     val uiState: StateFlow<XiaozhiUiState> = _uiState.asStateFlow()
@@ -286,6 +288,11 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
                     scheduleEndConversationAndCloseWs()
                 }
                 "已准备结束对话并关闭连接。简短告别即可（若用户要求闭嘴或不要插话请不要再说话）。"
+            },
+            onVolumeChanged = {
+                if (musicPlayer.isPausedWithTrack()) {
+                    resumeMusicAfterVolumeTts = true
+                }
             }
         )
         wsClient = XiaozhiWebSocketClient(this)
@@ -1194,6 +1201,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
         if (phoneCallManager.hasPendingCall()) {
             executePendingCallAndIdle()
+            return
+        }
+        if (resumeMusicAfterVolumeTts) {
+            resumeMusicAfterVolumeTts = false
+            musicPlayer.resume()
+            startMusicAndReturnIdle()
             return
         }
         if (musicPlayer.hasDeferredStart()) {
