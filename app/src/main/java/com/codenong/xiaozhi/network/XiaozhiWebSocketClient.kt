@@ -50,6 +50,7 @@ class XiaozhiWebSocketClient(
 
     fun connect(identity: DeviceIdentity, config: WebSocketConfig, aecEnabled: Boolean = false) {
         this.aecEnabled = aecEnabled
+        Log.i(TAG_WS, "-> connect: url=${config.url}, aec=$aecEnabled")
         disconnect()
         val reqBuilder = Request.Builder()
             .url(config.url)
@@ -92,6 +93,11 @@ class XiaozhiWebSocketClient(
                 val detail = t.message ?: response?.message ?: "无法连接语音服务器"
                 Log.w(TAG_WS, "onFailure: $detail")
                 listener.onClosed(detail, true)
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (webSocket !== this@XiaozhiWebSocketClient.webSocket) return
+                Log.i(TAG_WS, "<- onClosing: code=$code reason=$reason")
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -186,7 +192,11 @@ class XiaozhiWebSocketClient(
     }
 
     fun disconnect() {
+        val hadSocket = webSocket != null
         socketOpen = false
+        if (hadSocket) {
+            Log.i(TAG_WS, "-> disconnect: closing WebSocket (sessionId=$sessionId)")
+        }
         webSocket?.close(1000, "Client disconnect")
         webSocket = null
         sessionId = ""

@@ -300,6 +300,7 @@ class McpServer(
                 (reminderControl?.onGetFiredReminder() ?: "暂无刚触发的提醒") to false
             }
             "self.conversation.end" -> {
+                android.util.Log.i("XiaozhiWS", "MCP tool called: self.conversation.end")
                 onEndConversation() to false
             }
             "self.reminder.cancel" -> {
