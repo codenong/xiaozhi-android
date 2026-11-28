@@ -48,6 +48,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +70,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.codenong.xiaozhi.BuildConfig
+import com.codenong.xiaozhi.audio.AecTestResult
+import com.codenong.xiaozhi.audio.AecTester
+import kotlinx.coroutines.launch
 import com.codenong.xiaozhi.R
 import com.codenong.xiaozhi.model.DeviceState
 import com.codenong.xiaozhi.service.XiaozhiUiState
@@ -99,10 +103,13 @@ fun RobotFaceScreen(
     onDismissGuide: () -> Unit,
     onCheckUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
-    onDismissUpdate: () -> Unit
+    onDismissUpdate: () -> Unit,
+    onSetAecTestActive: (Boolean) -> Unit = {}
 ) {
     var showSettings by remember { mutableStateOf(false) }
     var showPromptEditor by remember { mutableStateOf(false) }
+    var showAecTester by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -470,6 +477,12 @@ fun RobotFaceScreen(
                         }) {
                             Text("提示词：${state.activeWakeWord.ifBlank { "全部" }}")
                         }
+                        OutlinedButton(onClick = {
+                            showSettings = false
+                            showAecTester = true
+                        }) {
+                            Text("AEC 实测")
+                        }
                     }
                     updateState.statusMessage?.let { msg ->
                         Spacer(Modifier.height(6.dp))
@@ -560,6 +573,89 @@ fun RobotFaceScreen(
                     TextButton(onClick = onDismissUpdate) {
                         Text("稍后")
                     }
+                }
+            }
+        )
+    }
+
+    if (showAecTester) {
+        var isRunning by remember { mutableStateOf(false) }
+        var isPlayingBack by remember { mutableStateOf(false) }
+        var statusText by remember { mutableStateOf("点击「开始实测」：先采 1 秒底噪，再分别测【开启 AEC】与【关闭 AEC】外放录音对比。") }
+        var result by remember { mutableStateOf<AecTestResult?>(null) }
+        val tester = remember(context) { AecTester(context.applicationContext) }
+
+        DisposableEffect(Unit) {
+            onSetAecTestActive(true)
+            onDispose { onSetAecTestActive(false) }
+        }
+
+        AlertDialog(
+            onDismissRequest = { if (!isRunning && !isPlayingBack) showAecTester = false },
+            title = { Text("AEC 回声消除实测") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(statusText, fontSize = 13.sp, color = Color(0xFF8B949E))
+                    result?.let { r ->
+                        Spacer(Modifier.height(12.dp))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2630)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(r.verdict, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF58A6FF))
+                                Text("系统 AEC 支持: ${r.aecHardwareAvailable} · 实例启用: ${r.aecCreatedEnabled}", fontSize = 12.sp, color = Color.White)
+                                Text("环境底噪平均幅度: ${r.noiseAvgAmp}", fontSize = 12.sp, color = Color(0xFF8B949E))
+                                Text("开启 AEC 残余幅度: avg=${r.aecOnAvgAmp}, peak=${r.aecOnPeakAmp}", fontSize = 12.sp, color = Color(0xFF3FB950))
+                                Text("关闭 AEC 基准幅度: avg=${r.aecOffAvgAmp}, peak=${r.aecOffPeakAmp}", fontSize = 12.sp, color = Color(0xFFF0883E))
+                                Text("回声抑制比 (ERLE): ${"%.1f".format(r.erleDb)} dB", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(
+                            enabled = !isRunning && !isPlayingBack,
+                            onClick = {
+                                isPlayingBack = true
+                                coroutineScope.launch {
+                                    tester.playRecordedPcm(r.recordedAecOnPcm)
+                                    isPlayingBack = false
+                                }
+                            }
+                        ) {
+                            Text(if (isPlayingBack) "回放中..." else "回放【开启 AEC】录到的声音")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !isRunning && !isPlayingBack,
+                    onClick = {
+                        isRunning = true
+                        result = null
+                        coroutineScope.launch {
+                            tester.runComparisonTest { msg ->
+                                statusText = msg
+                            }.onSuccess { res ->
+                                result = res
+                                statusText = "测试完成（可在 logcat 查看 XiaozhiAECTest）："
+                            }.onFailure { err ->
+                                statusText = "测试失败: ${err.message}"
+                            }
+                            isRunning = false
+                        }
+                    }
+                ) {
+                    Text(if (isRunning) "测试中..." else "开始实测")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isRunning && !isPlayingBack,
+                    onClick = { showAecTester = false }
+                ) {
+                    Text("关闭")
                 }
             }
         )

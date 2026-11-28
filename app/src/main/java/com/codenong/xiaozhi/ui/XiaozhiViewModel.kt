@@ -132,6 +132,10 @@ class XiaozhiViewModel(application: Application) : AndroidViewModel(application)
     ): Result<Unit> =
         service?.updatePromptKeywords(wakeWord, exitWord, wakeTokens, exitTokens)
             ?: Result.failure(IllegalStateException("语音服务尚未就绪"))
+    fun setAecTestActive(active: Boolean) {
+        service?.setAecTestActive(active)
+    }
+
     fun updateOtaUrl(newUrl: String) = service?.updateOtaUrl(newUrl)
 
     fun saveUpdateUrl(url: String) {

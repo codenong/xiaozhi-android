@@ -850,6 +850,20 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         return result
     }
 
+    fun setAecTestActive(active: Boolean) {
+        if (active) {
+            if (_uiState.value.deviceState != DeviceState.IDLE) {
+                stopConversation()
+            }
+            audioEngine.stopCapture()
+            audioEngine.restoreAudioMode()
+        } else {
+            if (_uiState.value.deviceState == DeviceState.IDLE && hasMicPermission && _uiState.value.handsFreeWakeEnabled) {
+                maybeStartWakeWordListening()
+            }
+        }
+    }
+
     fun updateOtaUrl(newUrl: String) {
         identityStore.updateOtaUrl(newUrl)
         val identity = identityStore.getIdentity()

@@ -104,7 +104,8 @@ class MainActivity : ComponentActivity() {
                 onDismissGuide = { viewModel.dismissGuide() },
                 onCheckUpdate = { viewModel.checkForUpdate(silent = false) },
                 onDownloadUpdate = { viewModel.downloadAndInstallUpdate() },
-                onDismissUpdate = { viewModel.dismissUpdateDialog() }
+                onDismissUpdate = { viewModel.dismissUpdateDialog() },
+                onSetAecTestActive = { viewModel.setAecTestActive(it) }
             )
         }
     }
