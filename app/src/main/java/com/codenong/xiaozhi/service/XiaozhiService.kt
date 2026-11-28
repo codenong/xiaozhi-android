@@ -447,15 +447,12 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     private fun handleWakeWordTriggered(keyword: String) {
-        if (wakeWordDetector.isCurrentExitKeyword(keyword)) {
-            val state = _uiState.value.deviceState
-            if (state == DeviceState.LISTENING || state == DeviceState.SPEAKING) {
-                handleExitWordTriggered()
-            }
-            return
-        }
         val state = _uiState.value.deviceState
-        if (state == DeviceState.IDLE) {
+        Log.i(
+            "XiaozhiKWS",
+            "handleWakeWordTriggered('$keyword'): state=$state, net=$isNetworkAvailable, hasWs=${cachedWsConfig != null}, wsConnected=${wsClient.isConnected()}"
+        )
+        if (state == DeviceState.IDLE || (state == DeviceState.LISTENING && !wsClient.isConnected())) {
             pendingWakeKeyword = keyword
             startConversation()
         } else if (state == DeviceState.SPEAKING) {
@@ -923,6 +920,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             musicPlayer.pause()
         }
         if (!isNetworkAvailable) {
+            Log.w("XiaozhiWS", "startConversation aborted: isNetworkAvailable=false")
             _uiState.update {
                 it.copy(
                     deviceState = DeviceState.IDLE,
@@ -935,6 +933,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
         val ws = cachedWsConfig
         if (ws == null || ws.url.isBlank()) {
+            Log.w("XiaozhiWS", "startConversation: cachedWsConfig is null/blank, running bootstrapOta()")
             bootstrapOta()
             return
         }
