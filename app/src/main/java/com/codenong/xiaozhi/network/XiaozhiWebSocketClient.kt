@@ -23,6 +23,7 @@ interface XiaozhiSocketListener {
     fun onAudioPacket(opusBytes: ByteArray)
     fun onMcpRequest(payload: JSONObject)
     fun onAlert(status: String, message: String, emotion: String)
+    fun onServerGoodbye() {}
     fun onClosed(reason: String, isError: Boolean)
 }
 
@@ -245,7 +246,11 @@ class XiaozhiWebSocketClient(
                 Log.i(TAG_WS, "<- alert: [$status] $message")
                 listener.onAlert(status, message, emotion)
             }
-            else -> Log.d(TAG_WS, "<- $type: $raw")
+            "goodbye" -> {
+                Log.i(TAG_WS, "<- goodbye: $raw")
+                listener.onServerGoodbye()
+            }
+            else -> Log.i(TAG_WS, "<- $type: $raw")
         }
     }
 

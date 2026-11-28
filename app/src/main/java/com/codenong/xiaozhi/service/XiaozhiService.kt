@@ -1268,6 +1268,15 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         }
     }
 
+    override fun onServerGoodbye() {
+        Log.i("XiaozhiWS", "onServerGoodbye(): deviceState=${_uiState.value.deviceState}")
+        if (_uiState.value.deviceState == DeviceState.SPEAKING) {
+            scheduleEndConversationAndCloseWs()
+        } else {
+            closeWsAndReturnToWakeStandby()
+        }
+    }
+
     override fun onClosed(reason: String, isError: Boolean) {
         connectTimeoutJob?.cancel()
         if (isReminderActive && isError) {
