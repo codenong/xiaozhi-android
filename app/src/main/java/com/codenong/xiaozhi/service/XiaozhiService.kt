@@ -951,19 +951,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         acquireWifiLock()
         if (wsClient.isConnected()) {
             Log.i("XiaozhiWS", "Reusing active WebSocket connection (skipping reconnect)")
-            var sendOk = true
-            pendingWakeKeyword?.let { kw ->
-                val serverWakeWord = if (kw in _uiState.value.availableWakeWords) kw else "你好小智"
-                sendOk = wsClient.sendWakeWordDetected(serverWakeWord)
-                pendingWakeKeyword = null
-            }
-            if (sendOk) {
-                audioEngine.ensurePlaybackStarted(lastOutputSampleRate)
-                playConnectedChime()
-                startListeningInternal()
+            pendingWakeKeyword = null
+            audioEngine.ensurePlaybackStarted(lastOutputSampleRate)
+            playConnectedChime()
+            if (startListeningInternal()) {
                 return
             }
-            Log.w("XiaozhiWS", "Reused WebSocket send failed, reconnecting...")
+            Log.w("XiaozhiWS", "Reused WebSocket listen/start failed, reconnecting...")
         }
         _uiState.update {
             it.copy(
@@ -1001,8 +995,15 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         "我在听，请说话...（说「拜拜 / 退下」结束）"
     }
 
-    private fun startListeningInternal() {
+    private fun startListeningInternal(): Boolean {
         audioEngine.exitWordEnabled = true
+        val mode = when {
+            !_uiState.value.autoContinue -> "manual"
+            _uiState.value.aecAvailable -> "realtime"
+            else -> "auto"
+        }
+        val sent = wsClient.sendStartListening(mode)
+        if (!sent) return false
         _uiState.update {
             it.copy(
                 deviceState = DeviceState.LISTENING,
@@ -1013,18 +1014,13 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             )
         }
         updateNotification("正在聆听说话...")
-        val mode = when {
-            !_uiState.value.autoContinue -> "manual"
-            _uiState.value.aecAvailable -> "realtime"
-            else -> "auto"
-        }
-        wsClient.sendStartListening(mode)
         audioEngine.startConversationCapture(
             _uiState.value.activeWakeWord.ifBlank { null },
             _uiState.value.activeExitWord,
             _uiState.value.activeWakeTokens.ifBlank { null },
             _uiState.value.activeExitTokens.ifBlank { null }
         )
+        return true
     }
 
     private fun scheduleEndConversationAndCloseWs() {
@@ -1126,11 +1122,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
             wsClient.sendWakeWordDetected(reminderPrompt)
             return
         }
-        pendingWakeKeyword?.let { kw ->
-            val serverWakeWord = if (kw in _uiState.value.availableWakeWords) kw else "你好小智"
-            wsClient.sendWakeWordDetected(serverWakeWord)
-            pendingWakeKeyword = null
-        }
+        pendingWakeKeyword = null
         startListeningInternal()
     }
 
