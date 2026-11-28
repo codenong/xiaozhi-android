@@ -125,12 +125,17 @@ class AudioEngine(
         wakeTokens: String? = null,
         exitTokens: String? = null
     ) {
+        val switchingFromWake = captureMode != CaptureMode.CONVERSATION
         wakeWordDetector.initialize(selectedWakeWord, exitWord, wakeTokens, exitTokens)
         wakeWordDetector.reset()
         exitWordCooldownUntilMs = System.currentTimeMillis() + 800L
         if (isMusicDucked) {
             isMusicDucked = false
             onWakeSpeechEnergy(false)
+        }
+        if (switchingFromWake && audioRecord != null) {
+            Log.i("XiaozhiAudio", "Recreating AudioRecord under MODE_IN_COMMUNICATION for hardware AEC")
+            stopCapture()
         }
         captureMode = CaptureMode.CONVERSATION
         ensureCaptureLoopRunning()
@@ -441,7 +446,7 @@ class AudioEngine(
         private const val MUSIC_DUCK_AMP_THRESHOLD = 850L
         private const val MUSIC_DUCK_HANGOVER_MS = 2500L
         private const val TTS_ONSET_GUARD_MS = 350L
-        private const val SPEAKING_BARGE_IN_THRESHOLD = 350L
+        private const val SPEAKING_BARGE_IN_THRESHOLD = 700L
         private const val BARGE_IN_HANGOVER_MS = 1200L
         private const val BARGE_IN_PRE_ROLL_FRAMES = 3
         private const val PRE_ROLL_FRAMES = 6

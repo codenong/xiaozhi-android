@@ -1116,6 +1116,10 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onTtsStart() {
+        if (isUserDisconnecting || _uiState.value.deviceState == DeviceState.IDLE) {
+            Log.d("XiaozhiTTS", "Ignoring stale onTtsStart while IDLE/disconnecting")
+            return
+        }
         audioEngine.notifyTtsSpeaking(true)
         ignoreNextTtsStop = false
         _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
