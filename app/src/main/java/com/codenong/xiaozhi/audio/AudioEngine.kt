@@ -63,12 +63,30 @@ class AudioEngine(
     var isMusicPlaying: Boolean = false
 
     @Volatile
+    var isTtsSpeaking: Boolean = false
+
+    @Volatile
+    private var ttsOnsetGuardUntilMs: Long = 0L
+
+    fun notifyTtsSpeaking(speaking: Boolean) {
+        isTtsSpeaking = speaking
+        if (speaking) {
+            ttsOnsetGuardUntilMs = System.currentTimeMillis() + TTS_ONSET_GUARD_MS
+        } else {
+            bargeInUntilMs = 0L
+            bargeInPreRoll.clear()
+        }
+    }
+
+    @Volatile
     private var exitWordCooldownUntilMs: Long = 0L
 
     private var kwsActiveUntilMs: Long = 0L
     private val kwsPreRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES + 1)
     private var musicDuckUntilMs: Long = 0L
     private var isMusicDucked: Boolean = false
+    private var bargeInUntilMs: Long = 0L
+    private val bargeInPreRoll = ArrayDeque<ByteArray>(BARGE_IN_PRE_ROLL_FRAMES + 1)
 
     fun startWakeWordDetection(
         selectedWakeWord: String? = null,
@@ -250,6 +268,7 @@ class AudioEngine(
                                 continue
                             }
                         }
+                        val now = System.currentTimeMillis()
                         val avgAmp = pcmBuffer.fold(0L) { acc, s -> acc + abs(s.toInt()) } / frameSamples
                         val vad = avgAmp > 350
                         if (vad != lastVad) {
@@ -257,7 +276,31 @@ class AudioEngine(
                             onVoiceActivity(vad)
                         }
                         val opus = opusCodec.encode(pcmBuffer)
-                        onEncodedFrame(opus)
+                        if (!isTtsSpeaking) {
+                            bargeInPreRoll.clear()
+                            onEncodedFrame(opus)
+                        } else if (now < ttsOnsetGuardUntilMs) {
+                            // TTS 起播前 350ms 等待硬件 AEC 收敛，避免突发回声触发服务端 VAD
+                        } else {
+                            if (avgAmp > SPEAKING_BARGE_IN_THRESHOLD) {
+                                if (now >= bargeInUntilMs) {
+                                    Log.d("XiaozhiAudio", "Realtime barge-in opened (avgAmp=$avgAmp > $SPEAKING_BARGE_IN_THRESHOLD)")
+                                    for (pre in bargeInPreRoll) {
+                                        onEncodedFrame(pre)
+                                    }
+                                    bargeInPreRoll.clear()
+                                }
+                                bargeInUntilMs = now + BARGE_IN_HANGOVER_MS
+                            }
+                            if (now < bargeInUntilMs) {
+                                onEncodedFrame(opus)
+                            } else {
+                                if (bargeInPreRoll.size >= BARGE_IN_PRE_ROLL_FRAMES) {
+                                    bargeInPreRoll.removeFirst()
+                                }
+                                bargeInPreRoll.addLast(opus)
+                            }
+                        }
                     }
 
                     CaptureMode.OFF -> break
@@ -397,6 +440,10 @@ class AudioEngine(
         private const val WAKE_HANGOVER_MS = 3000L
         private const val MUSIC_DUCK_AMP_THRESHOLD = 850L
         private const val MUSIC_DUCK_HANGOVER_MS = 2500L
+        private const val TTS_ONSET_GUARD_MS = 350L
+        private const val SPEAKING_BARGE_IN_THRESHOLD = 350L
+        private const val BARGE_IN_HANGOVER_MS = 1200L
+        private const val BARGE_IN_PRE_ROLL_FRAMES = 3
         private const val PRE_ROLL_FRAMES = 6
     }
 }

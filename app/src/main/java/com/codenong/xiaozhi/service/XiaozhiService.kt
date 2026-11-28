@@ -488,7 +488,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         if (_uiState.value.deviceState != DeviceState.IDLE) {
             isUserDisconnecting = true
             ignoreNextTtsStop = false
-            audioEngine.exitWordEnabled = false
+            audioEngine.notifyTtsSpeaking(false)
+        audioEngine.exitWordEnabled = false
             wsClient.sendStopListening()
             if (_uiState.value.powerSaveEnabled) {
                 audioEngine.pausePlayback()
@@ -639,7 +640,8 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
         if (_uiState.value.deviceState != DeviceState.IDLE) {
             isUserDisconnecting = true
             ignoreNextTtsStop = false
-            audioEngine.exitWordEnabled = false
+            audioEngine.notifyTtsSpeaking(false)
+        audioEngine.exitWordEnabled = false
             wsClient.sendStopListening()
             audioEngine.pausePlayback()
             audioEngine.restoreAudioMode()
@@ -1098,6 +1100,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
 
     override fun onSttText(text: String) {
         if (isRealtimeMode() && _uiState.value.deviceState == DeviceState.SPEAKING) {
+            audioEngine.notifyTtsSpeaking(false)
             audioEngine.clearPlayback()
         }
         _uiState.update { it.copy(userSpeech = text) }
@@ -1113,6 +1116,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onTtsStart() {
+        audioEngine.notifyTtsSpeaking(true)
         ignoreNextTtsStop = false
         _uiState.update { it.copy(deviceState = DeviceState.SPEAKING) }
         audioEngine.exitWordEnabled = true
@@ -1132,6 +1136,7 @@ class XiaozhiService : Service(), XiaozhiSocketListener {
     }
 
     override fun onTtsStop() {
+        audioEngine.notifyTtsSpeaking(false)
         if (ignoreNextTtsStop) {
             ignoreNextTtsStop = false
             return
